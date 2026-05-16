@@ -1,0 +1,33 @@
+# Tier 1 — fast, staged-only, runs on every commit in every repo.
+# Consumed via `remotes:` from each repo's lefthook.yml. Keep every
+# command sub-second; anything slower belongs in lefthook-push.yml.
+#
+# Per-repo policy knobs (set in the repo's gitignored lefthook-local.yml
+# or the environment):
+#   LEFTHOOK_EXCLUDE   - comma list of command names to skip
+#   ORG_HOOKS          - absolute path to this repo's checkout (set by stub)
+
+pre-commit:
+  parallel: true
+  commands:
+    secrets:
+      # gitleaks >=8.18. Older builds: `gitleaks protect --staged`.
+      run: gitleaks git --pre-commit --staged --redact --no-banner
+    large-files:
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" large-files {staged_files}'
+    conflict-markers:
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" conflict-markers {staged_files}'
+    eof-whitespace:
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" eof-ws {staged_files}'
+
+commit-msg:
+  commands:
+    gitlint:
+      run: 'gitlint --msg-filename {1} -C "${ORG_HOOKS}/config/.gitlint"'
+
+# Linear-history guard. Authoritative enforcement is server-side
+# (GitHub Ruleset "require linear history"); this is fast local feedback.
+pre-merge-commit:
+  commands:
+    no-merge-on-protected:
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" no-merge-commit'

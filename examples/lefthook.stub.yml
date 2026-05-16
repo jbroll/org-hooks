@@ -1,0 +1,31 @@
+# Copy this to a repo as `lefthook.yml`, then run `lefthook install`.
+# This ~6-line stub is the ONLY hook config a repo carries; everything
+# else is pulled from the pinned org-hooks ref.
+#
+# Onboarding checklist (per repo, one at a time):
+#   1. cp org-hooks/examples/lefthook.stub.yml <repo>/lefthook.yml
+#   2. set `ref:` to the org-hooks tag you want to pin to
+#   3. choose the language profile(s) under `extends:`
+#   4. add `export ORG_HOOKS=<abs path to org-hooks checkout>` so bundled
+#      scripts resolve (or use a remote git_url instead of a path)
+#   5. add recommended devDeps (TS: @biomejs/biome typescript knip dpdm)
+#   6. lefthook install
+#   7. test: `lefthook run pre-commit` then a throwaway commit
+
+remotes:
+  - git_url: /home/john/src/org-hooks      # or git@github.com:org/org-hooks.git
+    ref: v0.1.0                             # pin to a tag — bump deliberately
+    configs:
+      - lefthook-common.yml
+      - lefthook-push.yml
+
+extends:
+  - profiles/ts.yml         # and/or profiles/python.yml, profiles/specs.yml
+
+# Per-repo / per-machine overrides go in a gitignored lefthook-local.yml,
+# e.g. dispatch heavy tests to a remote GPU queue instead of running them:
+#
+# pre-push:
+#   commands:
+#     gpu-tests:
+#       run: /home/john/src/simple-ci/sci push "$(basename $PWD)/ci/test"

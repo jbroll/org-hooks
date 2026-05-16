@@ -1,0 +1,20 @@
+# Spec/artifact-governance pack — ai-roller and any downstream repo that
+# adopts the AI-Roller framework. Opt in with: extends: [profiles/specs.yml]
+#
+# This is deliberately separate from code-quality packs: it validates
+# specification/documentation coherence, not code. The AI-agent "stop"
+# hook (Claude Code session lifecycle) is NOT modeled here — that lives
+# in .claude/settings.json and must stay decoupled from git hooks.
+
+pre-commit:
+  commands:
+    spec-check:
+      glob: "specs/**/*"
+      run: air check {staged_files}
+
+post-commit:
+  commands:
+    artifact-drift:
+      # Advisory only: detects doc<->code drift and files sync tasks.
+      # Must never block the commit (post-commit cannot, by design).
+      run: 'air artifact sync-drift --commit "$(git rev-parse HEAD)" || true'

@@ -1,0 +1,30 @@
+# Python language pack.
+# A repo opts in with:  extends: [profiles/python.yml]
+#
+# ruff is host-installed (format + lint + import-sort + security S-rules,
+# replaces black/isort/flake8/pyupgrade/bandit). mypy/vulture/deptry are
+# run via `uv tool run` so no repo-level install is required; a repo may
+# instead pin them in its own dev extras and drop the `uv tool run`.
+#
+# 2026 notes: stay on mypy for gating prod code (ty still beta, pyrefly
+# greenfield-only). deptry = unused/missing deps. import-linter for
+# architecture/cycle contracts when a repo defines .importlinter.
+
+pre-commit:
+  commands:
+    py-format:
+      glob: "*.py"
+      run: ruff format --check {staged_files}
+    py-lint:
+      glob: "*.py"
+      run: ruff check {staged_files}
+
+pre-push:
+  parallel: true
+  commands:
+    py-typecheck:
+      run: uv tool run mypy .
+    py-deadcode:
+      run: uv tool run vulture . --min-confidence 80
+    py-deps:
+      run: uv tool run deptry .

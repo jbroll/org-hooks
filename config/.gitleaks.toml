@@ -1,0 +1,16 @@
+# Extends gitleaks' built-in ruleset (covers AWS/GCP keys, PEM blocks,
+# generic API tokens, etc.). Add repo-agnostic allowlist entries here;
+# put repo-specific ones in the repo's own .gitleaks.toml.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "org-wide false-positive allowlist"
+regexes = [
+  '''EXAMPLE_[A-Z0-9_]+''',
+  '''(?i)dummy|placeholder|changeme''',
+]
+paths = [
+  '''(^|/)tests?/fixtures/''',
+  '''\.example$''',
+]

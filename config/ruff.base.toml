@@ -1,0 +1,18 @@
+# Shared Ruff base. Onboarding Python repos add to pyproject.toml:
+#   [tool.ruff]
+#   extend = "../org-hooks/config/ruff.base.toml"
+line-length = 100
+target-version = "py312"
+
+[lint]
+# Replaces flake8 + isort + pyupgrade + pydocstyle(core) + bandit:
+#   E/W pycodestyle, F pyflakes, I isort, UP pyupgrade, B bugbear,
+#   S flake8-bandit (security), SIM, C4, N pep8-naming.
+select = ["E", "W", "F", "I", "UP", "B", "S", "SIM", "C4", "N"]
+ignore = ["E501"]  # line length handled by formatter
+
+[lint.per-file-ignores]
+"tests/**" = ["S101"]  # assert is fine in tests
+
+[format]
+quote-style = "double"

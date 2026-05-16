@@ -1,0 +1,16 @@
+# Tier 2 — heavier checks, run on push (not every commit).
+# Language-specific work lives in profiles/*.yml (a repo `extends:` the
+# packs it needs). This file only holds language-agnostic push gates.
+#
+# Heavy test suites / coverage / e2e are intentionally NOT here: those
+# run in CI (or are dispatched to the remote GPU queue from the repo's
+# own lefthook-local.yml). Keep pre-push under a few seconds of local
+# work; dispatch long jobs, don't block on them.
+
+pre-push:
+  parallel: true
+  commands:
+    # Placeholder so the hook exists even with no language pack; real
+    # work is contributed by profiles/ts.yml, profiles/python.yml, etc.
+    noop:
+      run: 'true'

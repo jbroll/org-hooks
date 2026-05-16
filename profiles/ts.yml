@@ -1,0 +1,29 @@
+# TypeScript / JavaScript language pack.
+# A repo opts in with:  extends: [profiles/ts.yml]
+#
+# Tools are invoked via `npx --no-install` so each repo pins its own
+# versions in package.json (no global JS tooling). Recommended devDeps
+# when onboarding a TS repo:
+#   @biomejs/biome  typescript  knip  dpdm
+#
+# 2026 notes: knip replaces ts-prune (EOL); dpdm beats madge for TS;
+# cross-file duplicate type detection has no off-the-shelf tool, so the
+# bundled scripts/check-duplicate-types.mjs (TS Compiler API) fills it.
+
+pre-commit:
+  commands:
+    ts-format-lint:
+      glob: "*.{ts,tsx,js,jsx,mjs,cjs,json}"
+      run: npx --no-install biome check --staged --no-errors-on-unmatched
+
+pre-push:
+  parallel: true
+  commands:
+    ts-typecheck:
+      run: npx --no-install tsc --noEmit
+    ts-deadcode:
+      run: npx --no-install knip --no-progress
+    ts-circular:
+      run: npx --no-install dpdm --no-warning --no-tree --exit-code circular:1 "src/**/*.{ts,tsx}"
+    ts-dup-types:
+      run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src

@@ -1,0 +1,22 @@
+# Shared commit-message policy (gitlint). Generalises geocoder's ad-hoc
+# rules. Conventional-Commits-friendly but not mandatory.
+[general]
+ignore=body-is-missing
+regex-style-search=true
+
+[title-max-length]
+line-length=72
+
+[title-min-length]
+min-length=10
+
+[body-max-line-length]
+line-length=100
+
+# ASCII-only subject+body (matches the old geocoder hook intent).
+[contrib-title-conventional-commits]
+
+[ignore-by-title]
+# Skip auto-generated merge/revert subjects.
+regex=^(Merge|Revert)
+ignore=all
