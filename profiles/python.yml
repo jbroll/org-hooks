@@ -34,3 +34,6 @@ pre-push:
     py-deps:
       glob: "*.{py,toml,txt}"
       run: uv tool run deptry .
+    py-size-cap:
+      glob: "*.py"
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {push_files}'

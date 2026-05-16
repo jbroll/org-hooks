@@ -45,6 +45,35 @@ case "$cmd" in
       fi
     done
     ;;
+  size-cap)
+    # Per-file line cap on PRODUCTION source only (tests grow with
+    # coverage and are exempt). Default 500; override SIZE_CAP. An
+    # allowlisted file (one path-substring per line in .size-cap-allow,
+    # '#' comments) is exempt — fail-on-new / grandfather pattern.
+    cap="${SIZE_CAP:-500}"
+    prod='^(src|bin|lib)/.*\.(ts|tsx|js|jsx|mjs|cjs|py)$'
+    allow_file=".size-cap-allow"
+    is_allowed() {
+      [ -f "$allow_file" ] || return 1
+      while IFS= read -r pat; do
+        pat="${pat%%#*}"; pat="$(echo "$pat" | xargs 2>/dev/null || true)"
+        [ -n "$pat" ] || continue
+        case "$1" in *"$pat"*) return 0;; esac
+      done < "$allow_file"
+      return 1
+    }
+    for f in "$@"; do
+      [ -f "$f" ] || continue
+      echo "$f" | grep -qE "$prod" || continue
+      case "$f" in test/*|tests/*|*/test/*|*/tests/*|*.test.*|*.spec.*) continue;; esac
+      is_allowed "$f" && continue
+      n=$(wc -l <"$f" | tr -d ' ')
+      if [ "$n" -gt "$cap" ]; then
+        echo "  $f: $n lines (cap $cap) — split it, or add to $allow_file with a reason"
+        fail=1
+      fi
+    done
+    ;;
   no-merge-commit)
     # Blocks `git merge` that would create a merge commit on a protected
     # branch. Fast feedback only — GitHub Rulesets are authoritative.

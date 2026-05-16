@@ -36,3 +36,9 @@ pre-push:
     ts-dup-types:
       glob: "*.{ts,tsx}"
       run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src
+    ts-no-reexports:
+      glob: "*.{ts,tsx,js,jsx,mjs}"
+      run: node "${ORG_HOOKS}/scripts/check-no-reexports.mjs" src
+    ts-size-cap:
+      glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {push_files}'

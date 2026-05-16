@@ -22,8 +22,8 @@ here.
 |---|---|---|
 | `lefthook-common.yml` | pre-commit, commit-msg, pre-merge-commit | secret scan (gitleaks), hygiene (large files / conflict markers / EOF), commit-msg lint (gitlint), linear-history guard |
 | `lefthook-push.yml` | pre-push | language-agnostic push gates |
-| `profiles/ts.yml` | adds to pre-commit/pre-push | Biome (staged) · tsc · knip · dpdm · duplicate-type scan |
-| `profiles/python.yml` | adds to pre-commit/pre-push | ruff format+lint (staged) · mypy · vulture · deptry |
+| `profiles/ts.yml` | adds to pre-commit/pre-push | Biome (staged) · tsc · knip · dpdm · duplicate-type scan · no-reexports · size-cap |
+| `profiles/python.yml` | adds to pre-commit/pre-push | ruff format+lint (staged) · mypy · vulture · deptry · size-cap |
 | `profiles/specs.yml` | pre-commit/post-commit | AI-Roller `air check` / artifact-drift (ai-roller only) |
 
 Heavy tests/coverage/e2e are **not** in any hook — they belong in CI or
