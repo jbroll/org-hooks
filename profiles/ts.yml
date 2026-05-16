@@ -19,11 +19,20 @@ pre-commit:
 pre-push:
   parallel: true
   commands:
+    # `glob` scopes each command to the push's changed files: if a push
+    # contains no TS/JS (e.g. a Python- or docs-only change in a polyglot
+    # repo), Lefthook SKIPS the command entirely — no tsc/knip/dpdm cost.
+    # The tools still run project-wide (not just on matched files); the
+    # glob only decides whether the command runs at all.
     ts-typecheck:
+      glob: "*.{ts,tsx,json}"
       run: npx --no-install tsc --noEmit
     ts-deadcode:
+      glob: "*.{ts,tsx,json}"
       run: npx --no-install knip --no-progress
     ts-circular:
+      glob: "*.{ts,tsx}"
       run: npx --no-install dpdm --no-warning --no-tree --exit-code circular:1 "src/**/*.{ts,tsx}"
     ts-dup-types:
+      glob: "*.{ts,tsx}"
       run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src

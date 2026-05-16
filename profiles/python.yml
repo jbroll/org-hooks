@@ -22,9 +22,15 @@ pre-commit:
 pre-push:
   parallel: true
   commands:
+    # Scoped like the TS pack: a push with no .py (or no dep manifest
+    # change, for py-deps) skips the command entirely — no mypy/vulture/
+    # deptry cost on unrelated pushes.
     py-typecheck:
+      glob: "*.py"
       run: uv tool run mypy .
     py-deadcode:
+      glob: "*.py"
       run: uv tool run vulture . --min-confidence 80
     py-deps:
+      glob: "*.{py,toml,txt}"
       run: uv tool run deptry .
