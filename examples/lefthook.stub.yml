@@ -22,10 +22,17 @@ remotes:
 extends:
   - profiles/ts.yml         # and/or profiles/python.yml, profiles/specs.yml
 
-# Per-repo / per-machine overrides go in a gitignored lefthook-local.yml,
-# e.g. dispatch heavy tests to a remote GPU queue instead of running them:
+# Per-repo / per-machine overrides go in a gitignored lefthook-local.yml.
+# GPU-dispatched tests belong in pre-commit (dispatch is a fast network call;
+# the hook blocks on the remote result just like a local test run would):
 #
-# pre-push:
+# pre-commit:
 #   commands:
 #     gpu-tests:
-#       run: /home/john/src/simple-ci/sci push "$(basename $PWD)/ci/test"
+#       glob: "*.{ts,tsx,js,jsx,json,css}"   # skip on docs-only commits
+#       run: |
+#         SCI=/home/john/src/simple-ci/sci
+#         WT=$(basename "$(git rev-parse --show-toplevel)")
+#         unit=$("$SCI" push "${WT}/ci/test")
+#         e2e=$("$SCI"  push "${WT}/ci/e2e-smoke")
+#         "$SCI" wait "$unit" && "$SCI" wait "$e2e"

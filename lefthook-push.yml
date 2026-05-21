@@ -3,9 +3,9 @@
 # packs it needs). This file only holds language-agnostic push gates.
 #
 # Heavy test suites / coverage / e2e are intentionally NOT here: those
-# run in CI (or are dispatched to the remote GPU queue from the repo's
-# own lefthook-local.yml). Keep pre-push under a few seconds of local
-# work; dispatch long jobs, don't block on them.
+# run in CI, or — when dispatched to a remote GPU queue — belong in
+# pre-commit (see examples/lefthook.stub.yml). Pre-push stays fast:
+# local static analysis only (tsc, knip, dpdm via profiles/ts.yml).
 
 pre-push:
   parallel: true
