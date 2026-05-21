@@ -1,20 +1,20 @@
 # Copy this to a repo as `lefthook.yml`, then run `lefthook install`.
-# This ~6-line stub is the ONLY hook config a repo carries; everything
-# else is pulled from the pinned org-hooks ref.
+# This stub is the ONLY hook config a repo carries; everything else is
+# pulled from the pinned org-hooks ref.
 #
 # Onboarding checklist (per repo, one at a time):
 #   1. cp org-hooks/examples/lefthook.stub.yml <repo>/lefthook.yml
 #   2. set `ref:` to the org-hooks tag you want to pin to
 #   3. choose the language profile(s) under `extends:`
-#   4. add `export ORG_HOOKS=<abs path to org-hooks checkout>` so bundled
-#      scripts resolve (or use a remote git_url instead of a path)
+#   4. export ORG_HOOKS=/path/to/org-hooks in ~/.bashrc (one-time per machine)
 #   5. add recommended devDeps (TS: @biomejs/biome typescript knip dpdm)
-#   6. lefthook install
-#   7. test: `lefthook run pre-commit` then a throwaway commit
+#   6. define test-class commands (see below)
+#   7. lefthook install
+#   8. test: `lefthook run pre-commit` then a throwaway commit
 
 remotes:
   - git_url: /home/john/src/org-hooks      # or git@github.com:org/org-hooks.git
-    ref: v0.1.0                             # pin to a tag — bump deliberately
+    ref: v0.5.0                             # pin to a tag — bump deliberately
     configs:
       - lefthook-common.yml
       - lefthook-push.yml
@@ -22,17 +22,42 @@ remotes:
 extends:
   - profiles/ts.yml         # and/or profiles/python.yml, profiles/specs.yml
 
-# Per-repo / per-machine overrides go in a gitignored lefthook-local.yml.
-# GPU-dispatched tests belong in pre-commit (dispatch is a fast network call;
-# the hook blocks on the remote result just like a local test run would):
+# ── Test classes ────────────────────────────────────────────────────────────
+#
+# Define one command per test class. Each command has:
+#   glob:  which staged file patterns trigger this class
+#   run:   how to run the tests (local or GPU-dispatched)
+#
+# The glob means: if NO staged file matches, the command is skipped entirely.
+# This is how "only run e2e when UI code changes" is expressed.
+#
+# Default run commands below assume standard npm scripts. On machines with a
+# GPU queue (sci), override `run:` in a gitignored lefthook-local.yml to
+# dispatch remotely instead of running locally.
+#
+# Example — a project with two test classes:
 #
 # pre-commit:
 #   commands:
-#     gpu-tests:
-#       glob: "*.{ts,tsx,js,jsx,json,css}"   # skip on docs-only commits
+#     unit-tests:
+#       glob: "*.{ts,tsx,js,jsx,json,css,html}"   # any code change
+#       run: npm run test:coverage
+#
+#     e2e-tests:
+#       glob: "src/{components,views,plugins}/**/*.{ts,tsx,css}"   # UI only
+#       run: npm run test:e2e
+#
+# Machine-specific GPU override in gitignored lefthook-local.yml:
+#
+# pre-commit:
+#   commands:
+#     unit-tests:              # same name — lefthook deep-merges, glob is kept
 #       run: |
 #         SCI=/home/john/src/simple-ci/sci
 #         WT=$(basename "$(git rev-parse --show-toplevel)")
-#         unit=$("$SCI" push "${WT}/ci/test")
-#         e2e=$("$SCI"  push "${WT}/ci/e2e-smoke")
-#         "$SCI" wait "$unit" && "$SCI" wait "$e2e"
+#         job=$("$SCI" push "${WT}/ci/test") && "$SCI" wait "$job"
+#     e2e-tests:
+#       run: |
+#         SCI=/home/john/src/simple-ci/sci
+#         WT=$(basename "$(git rev-parse --show-toplevel)")
+#         job=$("$SCI" push "${WT}/ci/e2e-smoke") && "$SCI" wait "$job"

@@ -1,29 +1,24 @@
 # TypeScript / JavaScript language pack.
 # A repo opts in with:  extends: [profiles/ts.yml]
 #
+# All static-analysis checks run pre-commit so breakage is caught immediately.
+# The same checks repeat pre-push as a safety net for commits made without
+# hooks (e.g. from another machine or with --no-verify).
+#
 # Tools are invoked via `npx --no-install` so each repo pins its own
-# versions in package.json (no global JS tooling). Recommended devDeps
-# when onboarding a TS repo:
+# versions in package.json. Recommended devDeps:
 #   @biomejs/biome  typescript  knip  dpdm
 #
-# 2026 notes: knip replaces ts-prune (EOL); dpdm beats madge for TS;
-# cross-file duplicate type detection has no off-the-shelf tool, so the
-# bundled scripts/check-duplicate-types.mjs (TS Compiler API) fills it.
+# Test-class commands (unit-tests, e2e-tests, …) are NOT defined here —
+# they belong in the repo's committed lefthook.yml with project-specific
+# globs and run commands. See examples/lefthook.stub.yml.
 
 pre-commit:
+  parallel: true
   commands:
     ts-format-lint:
       glob: "*.{ts,tsx,js,jsx,mjs,cjs,json}"
       run: npx --no-install biome check --staged --no-errors-on-unmatched
-
-pre-push:
-  parallel: true
-  commands:
-    # `glob` scopes each command to the push's changed files: if a push
-    # contains no TS/JS (e.g. a Python- or docs-only change in a polyglot
-    # repo), Lefthook SKIPS the command entirely — no tsc/knip/dpdm cost.
-    # The tools still run project-wide (not just on matched files); the
-    # glob only decides whether the command runs at all.
     ts-typecheck:
       glob: "*.{ts,tsx,json}"
       run: npx --no-install tsc --noEmit
@@ -32,7 +27,33 @@ pre-push:
       run: npx --no-install knip --no-progress
     ts-circular:
       glob: "*.{ts,tsx}"
-      run: npx --no-install dpdm --no-warning --no-tree --exit-code circular:1 "src/**/*.{ts,tsx}"
+      run: >-
+        npx --no-install dpdm --no-warning --no-tree
+        --exit-code circular:1 "src/**/*.{ts,tsx}"
+    ts-dup-types:
+      glob: "*.{ts,tsx}"
+      run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src
+    ts-no-reexports:
+      glob: "*.{ts,tsx,js,jsx,mjs}"
+      run: node "${ORG_HOOKS}/scripts/check-no-reexports.mjs" src
+    ts-size-cap:
+      glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'
+
+pre-push:
+  parallel: true
+  commands:
+    ts-typecheck:
+      glob: "*.{ts,tsx,json}"
+      run: npx --no-install tsc --noEmit
+    ts-deadcode:
+      glob: "*.{ts,tsx,json}"
+      run: npx --no-install knip --no-progress
+    ts-circular:
+      glob: "*.{ts,tsx}"
+      run: >-
+        npx --no-install dpdm --no-warning --no-tree
+        --exit-code circular:1 "src/**/*.{ts,tsx}"
     ts-dup-types:
       glob: "*.{ts,tsx}"
       run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src

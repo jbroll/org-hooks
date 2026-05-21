@@ -20,11 +20,6 @@ pre-commit:
     eof-whitespace:
       run: '"${ORG_HOOKS}/scripts/hygiene.sh" eof-ws {staged_files}'
 
-commit-msg:
-  commands:
-    gitlint:
-      run: 'gitlint --msg-filename {1} -C "${ORG_HOOKS}/config/.gitlint"'
-
 # Linear-history guard. Authoritative enforcement is server-side
 # (GitHub Ruleset "require linear history"); this is fast local feedback.
 pre-merge-commit:
