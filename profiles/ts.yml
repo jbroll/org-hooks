@@ -11,6 +11,10 @@
 #                script so each project controls which configs are checked.
 #                Example: "tsc -p tsconfig.app.json && tsc -p tsconfig.backend.json"
 #
+#   knip         runs knip dead-code analysis with project-specific configuration.
+#                Configure knip.json and/or knip flags in this script.
+#                Example: "knip --no-progress" (with knip.json for ignore lists)
+#
 # Other tools are invoked via `npx --no-install` so each repo pins its own
 # versions in package.json. Recommended devDeps:
 #   @biomejs/biome  typescript  knip  dpdm
@@ -30,7 +34,7 @@ pre-commit:
       run: npm run type-check
     ts-deadcode:
       glob: "*.{ts,tsx,json}"
-      run: npx --no-install knip --no-progress
+      run: npm run knip
     ts-circular:
       glob: "*.{ts,tsx}"
       run: >-
@@ -54,7 +58,7 @@ pre-push:
       run: npm run type-check
     ts-deadcode:
       glob: "*.{ts,tsx,json}"
-      run: npx --no-install knip --no-progress
+      run: npm run knip
     ts-circular:
       glob: "*.{ts,tsx}"
       run: >-
