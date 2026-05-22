@@ -5,27 +5,38 @@
 # Onboarding checklist (per repo, one at a time):
 #   1. cp org-hooks/examples/lefthook.stub.yml <repo>/lefthook.yml
 #   2. set `git_url:` and `ref:` to your org-hooks path and tag
-#   3. set `ORG_HOOKS:` in the env block to match git_url
+#   3. create lefthook-rc.sh (see below) and update the path in `rc:`
 #   4. choose the language profile(s) in `configs:` under `remotes:`
 #   5. define a `type-check` npm script covering all your tsconfigs
-#   6. add recommended devDeps (TS: @biomejs/biome typescript knip dpdm)
-#   7. define test-class commands (see below)
-#   8. lefthook install
-#   9. test: `lefthook run pre-commit` then a throwaway commit
+#   6. define a `knip` npm script (e.g. knip --no-progress --include files)
+#   7. add recommended devDeps (TS: @biomejs/biome typescript knip dpdm)
+#   8. define test-class commands (see below)
+#   9. lefthook install
+#  10. test: `lefthook run pre-commit` then a throwaway commit
+#
+# NOTE: hook-level `env:` and root-level `env:` are both invalid in lefthook v2.
+# Use `rc:` (root-level) to source a shell file that exports ORG_HOOKS.
+# The rc file is sourced by the installed hook script before lefthook runs,
+# so ORG_HOOKS is available to all command subprocesses.
+#
+# Create lefthook-rc.sh alongside lefthook.yml:
+#   #!/bin/sh
+#   export ORG_HOOKS=/path/to/your/org-hooks   # must match git_url above
+#
+# For machines with a different org-hooks path, override rc: in a gitignored
+# lefthook-local.yml pointing to a machine-local rc file.
 
 remotes:
   - git_url: /home/john/src/org-hooks      # or git@github.com:org/org-hooks.git
-    ref: v0.6.0                             # pin to a tag — bump deliberately
+    ref: v0.6.2                             # pin to a tag — bump deliberately
     configs:
       - lefthook-common.yml
       - lefthook-push.yml
       - profiles/ts.yml       # and/or profiles/python.yml, profiles/specs.yml
 
-# ORG_HOOKS must match git_url above so scripts resolve correctly.
-# Hardcode it here — don't rely on shell env, which isn't set in IDEs or CI.
-# Override in gitignored lefthook-local.yml if your checkout is elsewhere.
-env:
-  ORG_HOOKS: /home/john/src/org-hooks
+# Sources lefthook-rc.sh before every hook — sets ORG_HOOKS and any other
+# machine-local env vars needed by org-hooks scripts.
+rc: lefthook-rc.sh
 
 # ── Test classes ────────────────────────────────────────────────────────────
 #
