@@ -5,7 +5,13 @@
 # The same checks repeat pre-push as a safety net for commits made without
 # hooks (e.g. from another machine or with --no-verify).
 #
-# Tools are invoked via `npx --no-install` so each repo pins its own
+# Convention — required npm scripts in each repo's package.json:
+#   type-check   runs tsc --noEmit for ALL tsconfigs the project needs
+#                (app, backend, tests, scripts, etc.). org-hooks calls this
+#                script so each project controls which configs are checked.
+#                Example: "tsc -p tsconfig.app.json && tsc -p tsconfig.backend.json"
+#
+# Other tools are invoked via `npx --no-install` so each repo pins its own
 # versions in package.json. Recommended devDeps:
 #   @biomejs/biome  typescript  knip  dpdm
 #
@@ -21,7 +27,7 @@ pre-commit:
       run: npx --no-install biome check --staged --no-errors-on-unmatched
     ts-typecheck:
       glob: "*.{ts,tsx,json}"
-      run: npx --no-install tsc --noEmit
+      run: npm run type-check
     ts-deadcode:
       glob: "*.{ts,tsx,json}"
       run: npx --no-install knip --no-progress
@@ -45,7 +51,7 @@ pre-push:
   commands:
     ts-typecheck:
       glob: "*.{ts,tsx,json}"
-      run: npx --no-install tsc --noEmit
+      run: npm run type-check
     ts-deadcode:
       glob: "*.{ts,tsx,json}"
       run: npx --no-install knip --no-progress
