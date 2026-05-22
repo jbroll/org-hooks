@@ -1,0 +1,38 @@
+# Simple-CI dispatch profile.
+# Include alongside profiles/ts.yml in remotes: configs for repos that
+# dispatch test jobs to a simple-ci GPU worker.
+#
+# Convention:
+#   sci binary:  /home/john/src/simple-ci/sci  (override in lefthook-local.yml)
+#   job names:   <worktree-basename>/ci/test
+#                <worktree-basename>/ci/e2e-smoke
+#   fallbacks:   npm run test:coverage  /  npm run test:e2e
+#
+# Override e2e-tests glob in your lefthook.yml to narrow to frontend files only.
+
+pre-commit:
+  commands:
+    unit-tests:
+      glob: "*.{ts,tsx,js,jsx,json,css,html}"
+      run: |
+        SCI=/home/john/src/simple-ci/sci
+        WT=$(basename "$(git rev-parse --show-toplevel)")
+        if test -x "$SCI"; then
+          job=$("$SCI" push "${WT}/ci/test")
+          echo "  unit queued ($job)"
+          "$SCI" wait "$job"
+        else
+          npm run test:coverage
+        fi
+    e2e-tests:
+      glob: "*.{ts,tsx,js,jsx,json,css,html}"
+      run: |
+        SCI=/home/john/src/simple-ci/sci
+        WT=$(basename "$(git rev-parse --show-toplevel)")
+        if test -x "$SCI"; then
+          job=$("$SCI" push "${WT}/ci/e2e-smoke")
+          echo "  e2e  queued ($job)"
+          "$SCI" wait "$job"
+        else
+          npm run test:e2e
+        fi
