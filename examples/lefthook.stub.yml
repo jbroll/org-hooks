@@ -7,12 +7,13 @@
 #   2. set `git_url:` and `ref:` to your org-hooks path and tag
 #   3. create lefthook-rc.sh (see below) and update the path in `rc:`
 #   4. choose the language profile(s) in `configs:` under `remotes:`
-#   5. define a `type-check` npm script covering all your tsconfigs
-#   6. define a `knip` npm script (e.g. knip --no-progress --include files)
-#   7. add recommended devDeps (TS: @biomejs/biome typescript knip dpdm)
-#   8. define test-class commands (see below)
-#   9. lefthook install
-#  10. test: `lefthook run pre-commit` then a throwaway commit
+#   5. add profiles/sci.yml if the repo dispatches tests to simple-ci
+#   6. define a `type-check` npm script covering all your tsconfigs
+#   7. define a `knip` npm script (e.g. knip --no-progress --include files)
+#   8. add recommended devDeps (TS: @biomejs/biome typescript knip dpdm)
+#   9. override e2e-tests glob in pre-commit if E2E should only trigger on UI files
+#  10. lefthook install
+#  11. test: `lefthook run pre-commit` then a throwaway commit
 #
 # NOTE: hook-level `env:` and root-level `env:` are both invalid in lefthook v2.
 # Use `rc:` (root-level) to source a shell file that exports ORG_HOOKS.
@@ -28,52 +29,23 @@
 
 remotes:
   - git_url: /home/john/src/org-hooks      # or git@github.com:org/org-hooks.git
-    ref: v0.6.2                             # pin to a tag — bump deliberately
+    ref: v0.6.5                             # pin to a tag — bump deliberately
     configs:
       - lefthook-common.yml
-      - lefthook-push.yml
       - profiles/ts.yml       # and/or profiles/python.yml, profiles/specs.yml
+      # - profiles/sci.yml    # add if this repo dispatches tests to simple-ci
 
 # Sources lefthook-rc.sh before every hook — sets ORG_HOOKS and any other
 # machine-local env vars needed by org-hooks scripts.
 rc: lefthook-rc.sh
 
-# ── Test classes ────────────────────────────────────────────────────────────
+# ── Overrides ───────────────────────────────────────────────────────────────
 #
-# Define one command per test class. Each command has:
-#   glob:  which staged file patterns trigger this class
-#   run:   how to run the tests (local or GPU-dispatched)
-#
-# The glob means: if NO staged file matches, the command is skipped entirely.
-# This is how "only run e2e when UI code changes" is expressed.
-#
-# Default run commands below assume standard npm scripts. On machines with a
-# GPU queue (sci), override `run:` in a gitignored lefthook-local.yml to
-# dispatch remotely instead of running locally.
-#
-# Example — a project with two test classes:
+# profiles/sci.yml provides unit-tests and e2e-tests with sci-or-fallback
+# dispatch. The only repo-specific override needed is narrowing e2e-tests
+# to frontend files so backend-only commits don't trigger E2E:
 #
 # pre-commit:
 #   commands:
-#     unit-tests:
-#       glob: "*.{ts,tsx,js,jsx,json,css,html}"   # any code change
-#       run: npm run test:coverage
-#
 #     e2e-tests:
-#       glob: "src/{components,views,plugins}/**/*.{ts,tsx,css}"   # UI only
-#       run: npm run test:e2e
-#
-# Machine-specific GPU override in gitignored lefthook-local.yml:
-#
-# pre-commit:
-#   commands:
-#     unit-tests:              # same name — lefthook deep-merges, glob is kept
-#       run: |
-#         SCI=/home/john/src/simple-ci/sci
-#         WT=$(basename "$(git rev-parse --show-toplevel)")
-#         job=$("$SCI" push "${WT}/ci/test") && "$SCI" wait "$job"
-#     e2e-tests:
-#       run: |
-#         SCI=/home/john/src/simple-ci/sci
-#         WT=$(basename "$(git rev-parse --show-toplevel)")
-#         job=$("$SCI" push "${WT}/ci/e2e-smoke") && "$SCI" wait "$job"
+#       glob: "src/{components,views,plugins}/**/*.{ts,tsx,css}"
