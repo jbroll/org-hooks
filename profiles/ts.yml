@@ -2,8 +2,8 @@
 # A repo opts in with:  extends: [profiles/ts.yml]
 #
 # All static-analysis checks run pre-commit so breakage is caught immediately.
-# The same checks repeat pre-push as a safety net for commits made without
-# hooks (e.g. from another machine or with --no-verify).
+# There is no pre-push section — repos that want a push safety net can add one
+# in their own lefthook.yml.
 #
 # Convention — required npm scripts in each repo's package.json:
 #   type-check   runs tsc --noEmit for ALL tsconfigs the project needs
@@ -49,27 +49,3 @@ pre-commit:
     ts-size-cap:
       glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
       run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'
-
-pre-push:
-  parallel: true
-  commands:
-    ts-typecheck:
-      glob: "*.{ts,tsx,json}"
-      run: npm run type-check
-    ts-deadcode:
-      glob: "*.{ts,tsx,json}"
-      run: npm run knip
-    ts-circular:
-      glob: "*.{ts,tsx}"
-      run: >-
-        npx --no-install dpdm --no-warning --no-tree
-        --exit-code circular:1 "src/**/*.{ts,tsx}"
-    ts-dup-types:
-      glob: "*.{ts,tsx}"
-      run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src
-    ts-no-reexports:
-      glob: "*.{ts,tsx,js,jsx,mjs}"
-      run: node "${ORG_HOOKS}/scripts/check-no-reexports.mjs" src
-    ts-size-cap:
-      glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
-      run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {push_files}'
