@@ -25,11 +25,36 @@ here.
 | `profiles/ts.yml` | adds to pre-commit/pre-push | Biome (staged) · tsc · knip · dpdm · duplicate-type scan · no-reexports · size-cap |
 | `profiles/python.yml` | adds to pre-commit/pre-push | ruff format+lint (staged) · mypy · vulture · deptry · size-cap |
 | `profiles/specs.yml` | pre-commit/post-commit | AI-Roller `air check` / artifact-drift (ai-roller only) |
+| `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e; syncs lcov back after dispatch |
+| `profiles/coverage.yml` | pre-commit (after unit-tests) | coverage ratchet — per-file lcov baseline; fails on regression |
 
-Heavy tests/coverage/e2e are **not** in any hook — they belong in CI or
-are dispatched to the remote GPU queue from a repo's gitignored
-`lefthook-local.yml`. Claude Code agent (`stop`) hooks stay in
-`.claude/settings.json` — intentionally decoupled from git hooks.
+Heavy tests/coverage/e2e are dispatched to the remote GPU queue via `profiles/sci.yml`.
+The `profiles/coverage.yml` ratchet runs after tests and enforces that no commit reduces
+per-file line coverage below its previous high-water mark. Claude Code agent (`stop`) hooks
+stay in `.claude/settings.json` — intentionally decoupled from git hooks.
+
+## Coverage ratchet
+
+`profiles/coverage.yml` adds a `coverage-ratchet` pre-commit command that reads
+`coverage/lcov.info` and compares it against a committed `coverage-baseline.json`.
+
+Rules (per staged source file):
+- **New file**: must reach the configured floor (default 75% lines hit).
+- **Existing file at ≥ floor**: must stay at or above the floor.
+- **Existing file below floor**: uncovered-line count must not increase.
+
+On pass the baseline is rewritten with the current run's numbers and re-staged.
+On fail the commit is aborted with a per-file summary.
+
+To enable on a repo:
+1. Add `lcov` to your test runner's coverage reporters (`npm run test:coverage` must
+   produce `coverage/lcov.info`).
+2. Add `profiles/coverage.yml` to `remotes.configs` in `lefthook.yml`.
+3. Run `npm run test:coverage` once; the baseline is written automatically on the
+   first passing run and committed with that change.
+
+When used with `profiles/sci.yml`, the lcov is synced from the CI host after a
+dispatched job so the ratchet always operates on fresh data.
 
 ## Host tools (installed once per machine)
 

@@ -1,0 +1,50 @@
+# Coverage ratchet profile. Opt in by adding profiles/coverage.yml to your
+# remotes: configs. Include alongside profiles/sci.yml when using simple-ci
+# (sci.yml syncs the lcov back from the CI host so the ratchet has fresh data).
+#
+# Convention:
+#   coverage-baseline.json  committed at repo root; written/updated by the
+#                           ratchet script on each passing run (auto-staged).
+#   COVERAGE_LCOV           path to lcov.info (default: coverage/lcov.info)
+#   COVERAGE_FLOOR          0–1 floor for new files (default: 0.75)
+#   COVERAGE_BASELINE       baseline path override (default: coverage-baseline.json)
+#
+# To enable on a repo:
+#   1. Add 'lcov' to your test runner's coverage reporters so lcov.info is
+#      produced by `npm run test:coverage`.
+#   2. Add profiles/coverage.yml to remotes.configs in lefthook.yml.
+#   3. Run `npm run test:coverage` once and commit; the baseline will be
+#      written automatically on the first passing run.
+#
+# The ratchet is a no-op when coverage-baseline.json does not yet exist, so
+# the initial commit is always clean. Override the src glob in your repo's
+# lefthook.yml if your source root differs from src/:
+#
+#   pre-commit:
+#     commands:
+#       coverage-ratchet:
+#         glob: "src/**/*.{ts,tsx}"   # narrow to only the files you instrument
+#
+# If your repo uses profiles/sci.yml, sci.yml syncs the lcov from the CI host
+# after a dispatched job so the ratchet always runs against fresh data. No
+# extra configuration needed.
+
+pre-commit:
+  commands:
+    coverage-ratchet:
+      depends_on: [unit-tests]
+      glob: "src/**/*.{ts,tsx,js,jsx,mjs,cjs}"
+      run: |
+        LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
+        BASELINE=${COVERAGE_BASELINE:-coverage-baseline.json}
+        if [ ! -f "$BASELINE" ]; then
+          exit 0
+        fi
+        if [ ! -f "$LCOV" ]; then
+          echo "coverage ratchet: $LCOV not found — run 'npm run test:coverage' first"
+          exit 2
+        fi
+        node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
+          --lcov "$LCOV" \
+          --baseline "$BASELINE" \
+          {staged_files}
