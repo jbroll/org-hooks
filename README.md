@@ -35,8 +35,9 @@ stay in `.claude/settings.json` — intentionally decoupled from git hooks.
 
 ## Coverage ratchet
 
-`profiles/coverage.yml` adds a `coverage-ratchet` pre-commit command that reads
-`coverage/lcov.info` and compares it against a committed `coverage-baseline.json`.
+`profiles/coverage.yml` adds two independent pre-commit ratchet commands — one for
+unit/node coverage, one for browser/E2E coverage. Both read an lcov.info file and
+compare per-file line counts against a committed baseline JSON.
 
 Rules (per staged source file):
 - **New file**: must reach the configured floor (default 75% lines hit).
@@ -46,15 +47,24 @@ Rules (per staged source file):
 On pass the baseline is rewritten with the current run's numbers and re-staged.
 On fail the commit is aborted with a per-file summary.
 
-To enable on a repo:
-1. Add `lcov` to your test runner's coverage reporters (`npm run test:coverage` must
-   produce `coverage/lcov.info`).
-2. Add `profiles/coverage.yml` to `remotes.configs` in `lefthook.yml`.
-3. Run `npm run test:coverage` once; the baseline is written automatically on the
-   first passing run and committed with that change.
+| Command | Baseline file | lcov source | Fires after |
+|---|---|---|---|
+| `coverage-ratchet` | `coverage-baseline.json` | `coverage/lcov.info` | `unit-tests` |
+| `coverage-ratchet-e2e` | `coverage-e2e-baseline.json` | `coverage/e2e/lcov.info` | `e2e-tests` |
 
-When used with `profiles/sci.yml`, the lcov is synced from the CI host after a
-dispatched job so the ratchet always operates on fresh data.
+Each ratchet is a no-op when its baseline file does not exist — create the file to
+opt in. Override `glob`, `COVERAGE_LCOV`/`COVERAGE_E2E_LCOV`, and
+`COVERAGE_BASELINE`/`COVERAGE_E2E_BASELINE` in your repo's `lefthook.yml` as needed.
+
+When used with `profiles/sci.yml`, each ratchet's lcov is synced from the CI host
+after the corresponding dispatched job.
+
+**Force-seeding** — to accept the current lcov as the new baseline after a large
+refactor:
+```sh
+node <ORG_HOOKS>/scripts/coverage-ratchet.mjs --seed \
+  --lcov coverage/lcov.info --baseline coverage-baseline.json
+```
 
 ## Host tools (installed once per machine)
 

@@ -19,6 +19,9 @@
 //   --floor N         0–1 floor for new/above-floor files (default: $COVERAGE_FLOOR or 0.75)
 //   --src-root DIR    strip path prefix up to this dir name when normalising lcov
 //                     SF: paths (default: src)
+//   --seed            write current lcov to baseline unconditionally; no gate check.
+//                     Use after a large refactor to accept the current state as the
+//                     new floor. Requires lcov to exist; ignores staged_file list.
 //
 // Exit codes:  0 = pass  1 = coverage regression  2 = setup error (missing lcov)
 //
@@ -43,6 +46,7 @@ let lcovPath = process.env.COVERAGE_LCOV ?? "coverage/lcov.info";
 let baselinePath = process.env.COVERAGE_BASELINE ?? "coverage-baseline.json";
 let floor = Number(process.env.COVERAGE_FLOOR ?? "0.75");
 let srcRoot = "src";
+let seedMode = false;
 /** @type {string[]} */
 const stagedFiles = [];
 
@@ -52,10 +56,11 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (arg === "--baseline") baselinePath = process.argv[++i];
   else if (arg === "--floor") floor = Number(process.argv[++i]);
   else if (arg === "--src-root") srcRoot = process.argv[++i];
+  else if (arg === "--seed") seedMode = true;
   else if (!arg.startsWith("--")) stagedFiles.push(arg);
 }
 
-if (stagedFiles.length === 0) process.exit(0);
+if (!seedMode && stagedFiles.length === 0) process.exit(0);
 
 // ---------------------------------------------------------------------------
 // Baseline
@@ -84,6 +89,10 @@ const baselineIsEmpty = Object.keys(baseline.files).length === 0;
 // ---------------------------------------------------------------------------
 
 if (!fs.existsSync(lcovPath)) {
+  if (seedMode) {
+    console.error(`coverage ratchet --seed: ${lcovPath} not found — run tests with coverage first`);
+    process.exit(2);
+  }
   if (!baselineIsEmpty) {
     console.error(
       `coverage ratchet: ${lcovPath} not found — run \`npm run test:coverage\` first`,
@@ -220,6 +229,20 @@ function checkOne(file, prev, cur) {
       reason: `more uncovered lines: ${uncovered(prev)} → ${uncovered(cur)} (${fmtPct(pct(prev))} → ${fmtPct(pct(cur))})`,
     };
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Seed mode — accept current lcov as baseline unconditionally
+// ---------------------------------------------------------------------------
+
+if (seedMode) {
+  const next = { version: 1, files: /** @type {Record<string, FileMetric>} */ ({}) };
+  for (const [file, metric] of Object.entries(lcov)) next.files[file] = metric;
+  fs.writeFileSync(baselinePath, `${JSON.stringify(next, null, 2)}\n`);
+  execSync(`git add ${baselinePath}`, { stdio: "ignore" });
+  const count = Object.keys(next.files).length;
+  console.log(`coverage ratchet --seed: wrote ${count} files to ${baselinePath}`);
+  process.exit(0);
 }
 
 // ---------------------------------------------------------------------------

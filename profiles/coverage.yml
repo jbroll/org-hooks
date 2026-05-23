@@ -1,33 +1,45 @@
 # Coverage ratchet profile. Opt in by adding profiles/coverage.yml to your
 # remotes: configs. Include alongside profiles/sci.yml when using simple-ci
-# (sci.yml syncs the lcov back from the CI host so the ratchet has fresh data).
+# (sci.yml syncs both lcov files from CI so the ratchets always have fresh data).
 #
-# Convention:
-#   coverage-baseline.json  committed at repo root; written/updated by the
-#                           ratchet script on each passing run (auto-staged).
-#   COVERAGE_LCOV           path to lcov.info (default: coverage/lcov.info)
-#   COVERAGE_FLOOR          0–1 floor for new files (default: 0.75)
-#   COVERAGE_BASELINE       baseline path override (default: coverage-baseline.json)
+# Two independent ratchets — opt into each by creating the matching baseline file:
 #
-# To enable on a repo:
-#   1. Add 'lcov' to your test runner's coverage reporters so lcov.info is
-#      produced by `npm run test:coverage`.
-#   2. Add profiles/coverage.yml to remotes.configs in lefthook.yml.
-#   3. Run `npm run test:coverage` once and commit; the baseline will be
-#      written automatically on the first passing run.
+#   coverage-ratchet      unit/node ratchet
+#     baseline:  coverage-baseline.json        (default; COVERAGE_BASELINE overrides)
+#     lcov:      coverage/lcov.info            (default; COVERAGE_LCOV overrides)
+#     fires after unit-tests completes
 #
-# The ratchet is a no-op when coverage-baseline.json does not yet exist, so
-# the initial commit is always clean. Override the src glob in your repo's
-# lefthook.yml if your source root differs from src/:
+#   coverage-ratchet-e2e  browser/E2E ratchet
+#     baseline:  coverage-e2e-baseline.json    (default; COVERAGE_E2E_BASELINE overrides)
+#     lcov:      coverage/e2e/lcov.info        (default; COVERAGE_E2E_LCOV overrides)
+#     fires after e2e-tests completes
+#
+# Both ratchets are a no-op when their baseline file does not exist, so you can
+# enable them independently.  COVERAGE_FLOOR (default 0.75) applies to both.
+#
+# To enable unit ratchet:
+#   1. Add 'lcov' to your test runner's coverage reporters.
+#   2. Create coverage-baseline.json (empty: {"version":1,"files":{}}).
+#   3. The baseline is populated automatically on the first passing run.
+#
+# To enable E2E ratchet:
+#   1. Instrument your Playwright run with V8 coverage (e.g. monocart-reporter
+#      or @playwright/test with coverage fixtures) producing an lcov.info.
+#   2. Create coverage-e2e-baseline.json (empty: {"version":1,"files":{}}).
+#
+# Override glob and/or env vars in your repo's lefthook.yml for finer control:
 #
 #   pre-commit:
 #     commands:
-#       coverage-ratchet:
-#         glob: "src/**/*.{ts,tsx}"   # narrow to only the files you instrument
+#       coverage-ratchet-e2e:
+#         glob: "src/{admin,site}/**/*.ts"
+#         env:
+#           COVERAGE_E2E_LCOV: coverage/e2e/lcov.info
+#           COVERAGE_E2E_BASELINE: scripts/coverage-baseline.json
 #
-# If your repo uses profiles/sci.yml, sci.yml syncs the lcov from the CI host
-# after a dispatched job so the ratchet always runs against fresh data. No
-# extra configuration needed.
+# Force-seed: to accept current lcov as the new baseline after a large refactor:
+#   node <ORG_HOOKS>/scripts/coverage-ratchet.mjs --seed \
+#     --lcov coverage/lcov.info --baseline coverage-baseline.json
 
 pre-commit:
   commands:
@@ -37,11 +49,25 @@ pre-commit:
       run: |
         LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
         BASELINE=${COVERAGE_BASELINE:-coverage-baseline.json}
-        if [ ! -f "$BASELINE" ]; then
-          exit 0
-        fi
+        if [ ! -f "$BASELINE" ]; then exit 0; fi
         if [ ! -f "$LCOV" ]; then
           echo "coverage ratchet: $LCOV not found — run 'npm run test:coverage' first"
+          exit 2
+        fi
+        node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
+          --lcov "$LCOV" \
+          --baseline "$BASELINE" \
+          {staged_files}
+
+    coverage-ratchet-e2e:
+      depends_on: [e2e-tests]
+      glob: "src/**/*.{ts,tsx,js,jsx,mjs,cjs}"
+      run: |
+        LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
+        BASELINE=${COVERAGE_E2E_BASELINE:-coverage-e2e-baseline.json}
+        if [ ! -f "$BASELINE" ]; then exit 0; fi
+        if [ ! -f "$LCOV" ]; then
+          echo "coverage ratchet (e2e): $LCOV not found — run E2E tests with coverage first"
           exit 2
         fi
         node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \

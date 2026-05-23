@@ -9,8 +9,9 @@
 #   fallbacks:   npm run test:coverage  /  npm run test:e2e
 #
 # Coverage ratchet: when profiles/coverage.yml is also included, this profile
-# syncs coverage/lcov.info back from the CI host after a dispatched job so the
-# ratchet command has fresh data to compare against the baseline.
+# syncs lcov files from the CI host after each dispatched job so both ratchets
+# (unit and e2e) always have fresh data. The syncs are safe no-ops when
+# coverage.yml is not included.
 #
 # Override e2e-tests glob in your lefthook.yml to narrow to frontend files only.
 
@@ -45,6 +46,15 @@ pre-commit:
           job=$("$SCI" push "${WT}/ci/e2e-smoke")
           echo "  e2e  queued ($job)"
           "$SCI" wait "$job"
+          # Sync e2e lcov from CI host so the coverage-ratchet-e2e command
+          # (profiles/coverage.yml) has fresh data. Safe no-op when coverage.yml
+          # is not included or the e2e ratchet baseline does not exist.
+          E2E_LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
+          if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
+            worktree="ci-worktrees/${WT}-${job}"
+            mkdir -p "$(dirname "$E2E_LCOV")"
+            scp -q "$ci_host:$worktree/$E2E_LCOV" "$E2E_LCOV" 2>/dev/null || true
+          fi
         else
           npm run test:e2e
         fi
