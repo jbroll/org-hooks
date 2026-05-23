@@ -14,8 +14,8 @@
 #     lcov:      coverage/e2e/lcov.info        (default; COVERAGE_E2E_LCOV overrides)
 #     fires after e2e-tests completes
 #
-# Both ratchets are a no-op when their baseline file does not exist, so you can
-# enable them independently.  COVERAGE_FLOOR (default 0.75) applies to both.
+# Both ratchets are a no-op when their baseline file does not exist or is empty,
+# so you can enable them independently.  COVERAGE_FLOOR (default 0.75) applies to both.
 #
 # To enable unit ratchet:
 #   1. Add 'lcov' to your test runner's coverage reporters.
@@ -50,10 +50,6 @@ pre-commit:
         LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
         BASELINE=${COVERAGE_BASELINE:-coverage-baseline.json}
         if [ ! -f "$BASELINE" ]; then exit 0; fi
-        if [ ! -f "$LCOV" ]; then
-          echo "coverage ratchet: $LCOV not found — run 'npm run test:coverage' first"
-          exit 2
-        fi
         node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
           --lcov "$LCOV" \
           --baseline "$BASELINE" \
@@ -66,10 +62,6 @@ pre-commit:
         LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
         BASELINE=${COVERAGE_E2E_BASELINE:-coverage-e2e-baseline.json}
         if [ ! -f "$BASELINE" ]; then exit 0; fi
-        if [ ! -f "$LCOV" ]; then
-          echo "coverage ratchet (e2e): $LCOV not found — run E2E tests with coverage first"
-          exit 2
-        fi
         node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
           --lcov "$LCOV" \
           --baseline "$BASELINE" \
