@@ -30,15 +30,15 @@ function walk(dir, out = []) {
   return out;
 }
 
-// Matches top-level / exported declarations. Intentionally conservative:
-// favors false-negatives over flagging legitimate local shadows.
+// Only flags EXPORTED declarations — non-exported types are file-scoped
+// and cannot cause import confusion across files.
 //
-// `interface` and `enum` cannot appear in import specifiers, so any match
-// is a declaration. `type` CAN appear as an import modifier (`import type {
-// type Foo }`), so we only count it as a declaration when `=` or `<` follows
-// the name (real alias declarations always have `= …`; generic ones `<T>`).
+// `type` CAN appear as a type-only import modifier (`import type { type Foo }`),
+// so we require `=` or `<` after the name to confirm it's a real declaration.
+// `interface` and `enum` cannot appear in import specifiers, so any match is
+// a genuine declaration.
 const DECL =
-  /^\s*(?:export\s+)?(?:declare\s+)?(?:interface|type|enum)\s+([A-Z][A-Za-z0-9_]*)(.*)/;
+  /^\s*export\s+(?:declare\s+)?(?:interface|type|enum)\s+([A-Z][A-Za-z0-9_]*)(.*)/;
 
 const allow = new Set();
 if (existsSync(".dup-types-allow")) {
