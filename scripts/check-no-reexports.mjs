@@ -47,8 +47,9 @@ function walk(dir, out = []) {
 
 // `export ... from '...'`  or  `export * from`  or bare `export { ... }`
 // (not followed by `from`, and not an inline declaration).
+// `export {}` (empty braces) is excluded — it's a TypeScript module marker.
 const FROM = /^\s*export\s+(type\s+)?(\{[^}]*\}|\*)\s+from\s+['"]/;
-const BARE = /^\s*export\s+\{[^}]*\}\s*;?\s*$/;
+const BARE = /^\s*export\s+\{\s*\w[^}]*\}\s*;?\s*$/;
 
 let failed = 0;
 for (const file of walk(root)) {

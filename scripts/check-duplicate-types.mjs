@@ -32,8 +32,13 @@ function walk(dir, out = []) {
 
 // Matches top-level / exported declarations. Intentionally conservative:
 // favors false-negatives over flagging legitimate local shadows.
+//
+// `interface` and `enum` cannot appear in import specifiers, so any match
+// is a declaration. `type` CAN appear as an import modifier (`import type {
+// type Foo }`), so we only count it as a declaration when `=` or `<` follows
+// the name (real alias declarations always have `= …`; generic ones `<T>`).
 const DECL =
-  /^\s*(?:export\s+)?(?:declare\s+)?(?:interface|type|enum)\s+([A-Z][A-Za-z0-9_]*)/;
+  /^\s*(?:export\s+)?(?:declare\s+)?(?:interface|type|enum)\s+([A-Z][A-Za-z0-9_]*)(.*)/;
 
 const allow = new Set();
 if (existsSync(".dup-types-allow")) {
@@ -48,7 +53,11 @@ for (const file of walk(root)) {
   const names = new Set();
   for (const line of readFileSync(file, "utf8").split("\n")) {
     const m = DECL.exec(line);
-    if (m) names.add(m[1]);
+    if (!m) continue;
+    // For `type Foo`, only count it if what follows is `=` or `<` (real
+    // alias declaration). Import specifiers (`type Foo,`) are skipped.
+    const kw = /(?:interface|type|enum)/.exec(m[0])[0];
+    if (kw !== "type" || /^\s*[=<]/.test(m[2])) names.add(m[1]);
   }
   for (const n of names) {
     if (!seen.has(n)) seen.set(n, []);
