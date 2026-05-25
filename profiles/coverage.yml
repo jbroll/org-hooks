@@ -50,6 +50,7 @@ pre-commit:
         LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
         BASELINE=${COVERAGE_BASELINE:-coverage-baseline.json}
         if [ ! -f "$BASELINE" ]; then exit 0; fi
+        if [ ! -f "$LCOV" ]; then exit 0; fi
         node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
           --lcov "$LCOV" \
           --baseline "$BASELINE" \
@@ -62,6 +63,7 @@ pre-commit:
         LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
         BASELINE=${COVERAGE_E2E_BASELINE:-coverage-e2e-baseline.json}
         if [ ! -f "$BASELINE" ]; then exit 0; fi
+        if [ ! -f "$LCOV" ]; then exit 0; fi
         node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
           --lcov "$LCOV" \
           --baseline "$BASELINE" \
