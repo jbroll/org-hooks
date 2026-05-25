@@ -21,7 +21,7 @@ pre-commit:
       glob: "*.{ts,tsx,js,jsx,json,css,html}"
       run: |
         SCI=/home/john/src/simple-ci/sci
-        WT=$(basename "$(git rev-parse --show-toplevel)")
+        WT=${SCI_WT:-$(basename "$(git rev-parse --show-toplevel)")}
         if test -x "$SCI"; then
           job=$("$SCI" push "${WT}/ci/test")
           echo "  unit queued ($job)"
@@ -45,7 +45,7 @@ pre-commit:
       glob: "*.{ts,tsx,js,jsx,json,css,html}"
       run: |
         SCI=/home/john/src/simple-ci/sci
-        WT=$(basename "$(git rev-parse --show-toplevel)")
+        WT=${SCI_WT:-$(basename "$(git rev-parse --show-toplevel)")}
         if test -x "$SCI"; then
           job=$("$SCI" push "${WT}/ci/e2e-smoke")
           echo "  e2e  queued ($job)"
