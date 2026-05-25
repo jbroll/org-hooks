@@ -32,7 +32,7 @@ pre-commit:
         if test -x "$SCI"; then
           job=$("$SCI" push "${WT}/ci/test")
           echo "  unit queued ($job)"
-          "$SCI" wait "$job"; rc=$?
+          "$SCI" wait --timeout 60 "$job"; rc=$?
           # Retrieve fresh lcov from the CI host before running the ratchet.
           # The ratchet must run here — after this sync — to check current coverage.
           LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
@@ -70,7 +70,7 @@ pre-commit:
         if test -x "$SCI"; then
           job=$("$SCI" push "${WT}/ci/e2e-smoke")
           echo "  e2e  queued ($job)"
-          "$SCI" wait "$job"; rc=$?
+          "$SCI" wait --timeout 60 "$job"; rc=$?
           # Retrieve fresh E2E lcov from the CI host before running the ratchet.
           E2E_LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
           if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
