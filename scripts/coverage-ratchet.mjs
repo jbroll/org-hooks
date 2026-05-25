@@ -276,7 +276,16 @@ if (failures.length > 0) {
 const next = { version: 1, files: { ...baseline.files } };
 for (const [file, metric] of Object.entries(lcov)) next.files[file] = metric;
 fs.writeFileSync(baselinePath, `${JSON.stringify(next, null, 2)}\n`);
-execSync(`git add ${baselinePath}`, { stdio: "ignore" });
+// Retry git add up to 3 times — parallel ratchet runs can race on .git/index.lock.
+for (let attempt = 1; attempt <= 3; attempt++) {
+  try {
+    execSync(`git add ${baselinePath}`, { stdio: "ignore" });
+    break;
+  } catch {
+    if (attempt === 3) throw new Error(`Failed to stage ${baselinePath} after 3 attempts`);
+    execSync("sleep 1");
+  }
+}
 
 const summary = stagedFiles
   .map((f) => {
