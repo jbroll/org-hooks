@@ -18,7 +18,7 @@
 pre-commit:
   commands:
     unit-tests:
-      glob: "*.{ts,tsx,js,jsx,json,css,html}"
+      glob: "**/*.{ts,tsx,js,jsx,json,css,html}"
       run: |
         SCI=/home/john/src/simple-ci/sci
         WT=${SCI_WT:-$(basename "$(git rev-parse --show-toplevel)")}
@@ -42,7 +42,7 @@ pre-commit:
           npm run test:coverage
         fi
     e2e-tests:
-      glob: "*.{ts,tsx,js,jsx,json,css,html}"
+      glob: "**/*.{ts,tsx,js,jsx,json,css,html}"
       run: |
         SCI=/home/john/src/simple-ci/sci
         WT=${SCI_WT:-$(basename "$(git rev-parse --show-toplevel)")}
