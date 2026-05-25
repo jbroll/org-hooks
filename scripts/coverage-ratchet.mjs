@@ -105,19 +105,25 @@ if (!fs.existsSync(lcovPath)) {
 
 /**
  * Normalise a path from an lcov SF: record to be relative to CWD.
- * Handles both relative and absolute paths, including paths produced by a
- * remote CI worktree (different absolute prefix, same src-root structure).
+ * Handles absolute paths (server-side coverage), relative paths already
+ * relative to CWD, and browser-coverage paths with a hostname:port/ prefix
+ * (e.g. localhost-5438/src/...).
  * @param {string} p
  * @returns {string}
  */
 function normalisePath(p) {
-  if (!path.isAbsolute(p)) return p;
-  // Strip CWD prefix if present.
-  const cwd = process.cwd() + path.sep;
-  if (p.startsWith(cwd)) return p.slice(cwd.length);
-  // Strip up to the first occurrence of /<srcRoot>/ so CI worktree absolute
-  // paths (e.g. /home/user/ci-worktrees/repo-abc123/src/...) resolve correctly.
-  const marker = `${path.sep}${srcRoot}${path.sep}`;
+  // Absolute path: strip CWD or find /<srcRoot>/ marker.
+  if (path.isAbsolute(p)) {
+    const cwd = process.cwd() + path.sep;
+    if (p.startsWith(cwd)) return p.slice(cwd.length);
+    const marker = `${path.sep}${srcRoot}${path.sep}`;
+    const idx = p.indexOf(marker);
+    if (idx !== -1) return p.slice(idx + 1);
+    return p;
+  }
+  // Relative path: strip browser-coverage hostname:port/ prefix
+  // (e.g. "localhost-5438/src/..." → "src/...").
+  const marker = `/${srcRoot}/`;
   const idx = p.indexOf(marker);
   if (idx !== -1) return p.slice(idx + 1);
   return p;
