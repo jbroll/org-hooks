@@ -76,25 +76,13 @@ case "$cmd" in
     ;;
   test-size-cap)
     # Per-file line cap on TEST source only. Default 800; override TEST_SIZE_CAP.
-    # Uses .test-size-cap-allow for grandfathered exceptions.
     cap="${TEST_SIZE_CAP:-800}"
-    allow_file=".test-size-cap-allow"
-    is_allowed() {
-      [ -f "$allow_file" ] || return 1
-      while IFS= read -r pat; do
-        pat="${pat%%#*}"; pat="$(echo "$pat" | xargs 2>/dev/null || true)"
-        [ -n "$pat" ] || continue
-        case "$1" in *"$pat"*) return 0;; esac
-      done < "$allow_file"
-      return 1
-    }
     for f in "$@"; do
       [ -f "$f" ] || continue
       case "$f" in *.test.ts|*.test.tsx|*.test.js|*.test.jsx|*.spec.ts|*.spec.tsx) ;; *) continue;; esac
-      is_allowed "$f" && continue
       n=$(wc -l <"$f" | tr -d ' ')
       if [ "$n" -gt "$cap" ]; then
-        echo "  $f: $n lines (cap $cap) — split it, or add to $allow_file with a reason"
+        echo "  $f: $n lines (cap $cap) — split into smaller files"
         fail=1
       fi
     done
