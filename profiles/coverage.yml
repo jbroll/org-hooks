@@ -1,25 +1,26 @@
-# Coverage ratchet profile. Opt in by adding profiles/coverage.yml to your
-# remotes: configs. Include alongside profiles/sci.yml when using simple-ci.
+# Coverage ratchet profile.
 #
-# When sci.yml is also included, these commands are no-ops — sci.yml runs the
-# ratchet inline after retrieving fresh lcov from the CI host, which guarantees
-# the check runs against current-commit coverage.  These commands activate only
-# for repos without sci (i.e. when /home/john/src/simple-ci/sci is not present),
-# where npm run test:coverage / test:e2e runs locally and lcov is already on disk
-# before the ratchet fires.
+# When using simple-ci (profiles/sci.yml), the ratchet runs inline inside the
+# unit-tests and e2e-tests commands, after lcov is retrieved from the CI host.
+# That guarantees the check always uses coverage from this exact commit.
 #
-# Two independent ratchets — opt into each by creating the matching baseline file:
+# This file documents the ratchet configuration and provides the seed command.
+# It does NOT define separate lefthook commands — those would run in parallel
+# with the test job and check stale lcov.
 #
-#   coverage-ratchet      unit/node ratchet
-#     baseline:  coverage-baseline.json        (default; COVERAGE_BASELINE overrides)
-#     lcov:      coverage/lcov.info            (default; COVERAGE_LCOV overrides)
+# Ratchets activate when their baseline file exists and is non-empty:
 #
-#   coverage-ratchet-e2e  browser/E2E ratchet
-#     baseline:  coverage-e2e-baseline.json    (default; COVERAGE_E2E_BASELINE overrides)
-#     lcov:      coverage/e2e/lcov.info        (default; COVERAGE_E2E_LCOV overrides)
+#   unit ratchet:  coverage-baseline.json        (COVERAGE_BASELINE overrides)
+#                  coverage/lcov.info             (COVERAGE_LCOV overrides)
 #
-# Both ratchets are a no-op when their baseline file does not exist or is empty,
-# so you can enable them independently.  COVERAGE_FLOOR (default 0.75) applies to both.
+#   E2E ratchet:   coverage-e2e-baseline.json     (COVERAGE_E2E_BASELINE overrides)
+#                  coverage/e2e/lcov.info          (COVERAGE_E2E_LCOV overrides)
+#
+# COVERAGE_FLOOR (default 0.75) applies to both.
+#
+# Per-project staged-file excludes (grep -Ev pattern):
+#   COVERAGE_RATCHET_EXCLUDE       — extra excludes for unit ratchet
+#   COVERAGE_E2E_RATCHET_EXCLUDE   — extra excludes for E2E ratchet
 #
 # To enable unit ratchet:
 #   1. Add 'lcov' to your test runner's coverage reporters.
@@ -33,39 +34,3 @@
 # Force-seed: to accept current lcov as the new baseline after a large refactor:
 #   node <ORG_HOOKS>/scripts/coverage-ratchet.mjs --seed \
 #     --lcov coverage/lcov.info --baseline coverage-baseline.json
-
-pre-commit:
-  commands:
-    coverage-ratchet:
-      depends_on: [unit-tests]
-      glob: "src/**/*.{ts,tsx,js,jsx,mjs,cjs}"
-      run: |
-        # sci.yml handles this inline after lcov retrieval — skip here to avoid
-        # checking stale lcov in parallel with the unit-tests command.
-        SCI=/home/john/src/simple-ci/sci
-        if test -x "$SCI"; then exit 0; fi
-        LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
-        BASELINE=${COVERAGE_BASELINE:-coverage-baseline.json}
-        if [ ! -f "$BASELINE" ]; then exit 0; fi
-        if [ ! -f "$LCOV" ]; then exit 0; fi
-        node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
-          --lcov "$LCOV" \
-          --baseline "$BASELINE" \
-          {staged_files}
-
-    coverage-ratchet-e2e:
-      depends_on: [e2e-tests]
-      glob: "src/**/*.{ts,tsx,js,jsx,mjs,cjs}"
-      run: |
-        # sci.yml handles this inline after lcov retrieval — skip here to avoid
-        # checking stale lcov in parallel with the e2e-tests command.
-        SCI=/home/john/src/simple-ci/sci
-        if test -x "$SCI"; then exit 0; fi
-        LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
-        BASELINE=${COVERAGE_E2E_BASELINE:-coverage-e2e-baseline.json}
-        if [ ! -f "$BASELINE" ]; then exit 0; fi
-        if [ ! -f "$LCOV" ]; then exit 0; fi
-        node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
-          --lcov "$LCOV" \
-          --baseline "$BASELINE" \
-          {staged_files}
