@@ -8,10 +8,10 @@
 #                <worktree-basename>/ci/e2e-smoke
 #   fallbacks:   npm run test:coverage  /  npm run test:e2e
 #
-# Coverage ratchet: when profiles/coverage.yml is also included, the ratchet
-# runs inline here — AFTER lcov is retrieved from the CI host — so it always
-# checks fresh data.  lefthook v2 does not honour depends_on ordering, so we
-# cannot rely on a separate ratchet command running after this one.
+# Coverage ratchet: runs inline here — AFTER lcov is retrieved from the CI
+# host — so it always checks fresh data from this exact commit.
+# lefthook v2 does not honour depends_on ordering; a separate command would
+# run in parallel and check stale lcov.
 #
 # Ratchet staged-file filtering uses git diff --cached with sensible defaults:
 #   glob:    ^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$

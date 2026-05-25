@@ -25,42 +25,45 @@ here.
 | `profiles/ts.yml` | adds to pre-commit/pre-push | Biome (staged) · tsc · knip · dpdm · duplicate-type scan · no-reexports · size-cap |
 | `profiles/python.yml` | adds to pre-commit/pre-push | ruff format+lint (staged) · mypy · vulture · deptry · size-cap |
 | `profiles/specs.yml` | pre-commit/post-commit | AI-Roller `air check` / artifact-drift (ai-roller only) |
-| `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e; syncs lcov back after dispatch |
-| `profiles/coverage.yml` | pre-commit (after unit-tests) | coverage ratchet — per-file lcov baseline; fails on regression |
+| `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e; syncs lcov from CI host; runs coverage ratchet inline after sync |
 
 Heavy tests/coverage/e2e are dispatched to the remote GPU queue via `profiles/sci.yml`.
-The `profiles/coverage.yml` ratchet runs after tests and enforces that no commit reduces
-per-file line coverage below its previous high-water mark. Claude Code agent (`stop`) hooks
-stay in `.claude/settings.json` — intentionally decoupled from git hooks.
+The coverage ratchet is inlined at the end of each sci command — after the lcov is
+retrieved from the CI host — so it always checks coverage from the current commit.
 
 ## Coverage ratchet
 
-`profiles/coverage.yml` adds two independent pre-commit ratchet commands — one for
-unit/node coverage, one for browser/E2E coverage. Both read an lcov.info file and
-compare per-file line counts against a committed baseline JSON.
+The ratchet lives inside `profiles/sci.yml`, not in a separate lefthook command. This
+is intentional: lefthook v2 does not honour `depends_on` ordering, so a separate command
+would run in parallel with the test job and check whatever lcov happened to be on disk.
+By inlining it after the `scp` sync, ordering is enforced by the shell.
 
-Rules (per staged source file):
-- **New file**: must reach the configured floor (default 75% lines hit).
+Two independent ratchets, one per sci command:
+
+| sci command | Baseline file | lcov source |
+|---|---|---|
+| `unit-tests` | `coverage-baseline.json` | `coverage/lcov.info` |
+| `e2e-tests` | `coverage-e2e-baseline.json` | `coverage/e2e/lcov.info` |
+
+Each ratchet is a no-op when its baseline file does not exist — create the file to opt in.
+
+Rules (per staged source file, checked against `scripts/coverage-ratchet.mjs`):
+- **New file**: must reach the floor (default 75% lines hit).
 - **Existing file at ≥ floor**: must stay at or above the floor.
 - **Existing file below floor**: uncovered-line count must not increase.
 
-On pass the baseline is rewritten with the current run's numbers and re-staged.
-On fail the commit is aborted with a per-file summary.
+On pass the baseline is rewritten with current numbers and re-staged with the commit.
+On fail the commit is aborted with a per-file reason.
 
-| Command | Baseline file | lcov source | Fires after |
-|---|---|---|---|
-| `coverage-ratchet` | `coverage-baseline.json` | `coverage/lcov.info` | `unit-tests` |
-| `coverage-ratchet-e2e` | `coverage-e2e-baseline.json` | `coverage/e2e/lcov.info` | `e2e-tests` |
+**Staged-file filter** (applied by sci.yml via `git diff --cached`):
+- `^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$`
+- excludes `src/test/`, `*.test.*`, `*.spec.*`
+- per-repo extra excludes: `COVERAGE_RATCHET_EXCLUDE` / `COVERAGE_E2E_RATCHET_EXCLUDE` (grep -Ev pattern, set via lefthook.yml env:)
 
-Each ratchet is a no-op when its baseline file does not exist — create the file to
-opt in. Override `glob`, `COVERAGE_LCOV`/`COVERAGE_E2E_LCOV`, and
-`COVERAGE_BASELINE`/`COVERAGE_E2E_BASELINE` in your repo's `lefthook.yml` as needed.
+**Env var overrides**: `COVERAGE_LCOV`, `COVERAGE_BASELINE`, `COVERAGE_E2E_LCOV`,
+`COVERAGE_E2E_BASELINE`, `COVERAGE_FLOOR` (0–1, default 0.75).
 
-When used with `profiles/sci.yml`, each ratchet's lcov is synced from the CI host
-after the corresponding dispatched job.
-
-**Force-seeding** — to accept the current lcov as the new baseline after a large
-refactor:
+**Force-seeding** — accept the current lcov as the new baseline after a large refactor:
 ```sh
 node <ORG_HOOKS>/scripts/coverage-ratchet.mjs --seed \
   --lcov coverage/lcov.info --baseline coverage-baseline.json
