@@ -27,12 +27,15 @@ pre-commit:
           echo "  unit queued ($job)"
           "$SCI" wait "$job"; rc=$?
           # Sync lcov from CI host so the coverage-ratchet command (profiles/coverage.yml)
-          # has fresh data. Safe no-op when coverage.yml is not included.
+          # has fresh data. Uses 'sci path' to get the actual worktree location from the
+          # server — avoids hardcoding the CI_WORKTREES directory.
           LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
           if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
-            worktree="ci-worktrees/${WT}-${job}"
-            mkdir -p "$(dirname "$LCOV")"
-            scp -q "$ci_host:$worktree/$LCOV" "$LCOV" 2>/dev/null || true
+            worktree=$("$SCI" path "$job" 2>/dev/null)
+            if [ -n "$worktree" ]; then
+              mkdir -p "$(dirname "$LCOV")"
+              scp -q "$ci_host:$worktree/$LCOV" "$LCOV" 2>/dev/null || true
+            fi
           fi
           exit $rc
         else
@@ -48,13 +51,15 @@ pre-commit:
           echo "  e2e  queued ($job)"
           "$SCI" wait "$job"; rc=$?
           # Sync e2e lcov from CI host so the coverage-ratchet-e2e command
-          # (profiles/coverage.yml) has fresh data. Safe no-op when coverage.yml
-          # is not included or the e2e ratchet baseline does not exist.
+          # (profiles/coverage.yml) has fresh data. Uses 'sci path' to get the
+          # actual worktree location — avoids hardcoding CI_WORKTREES.
           E2E_LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
           if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
-            worktree="ci-worktrees/${WT}-${job}"
-            mkdir -p "$(dirname "$E2E_LCOV")"
-            scp -q "$ci_host:$worktree/$E2E_LCOV" "$E2E_LCOV" 2>/dev/null || true
+            worktree=$("$SCI" path "$job" 2>/dev/null)
+            if [ -n "$worktree" ]; then
+              mkdir -p "$(dirname "$E2E_LCOV")"
+              scp -q "$ci_host:$worktree/$E2E_LCOV" "$E2E_LCOV" 2>/dev/null || true
+            fi
           fi
           exit $rc
         else
