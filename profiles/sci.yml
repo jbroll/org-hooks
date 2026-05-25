@@ -50,8 +50,10 @@ pre-commit:
               | grep -E '^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$' \
               | grep -Ev '(^src/test/|\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$)')
             if [ -f "coverage-ratchet-exclude" ]; then
-              staged=$(printf '%s\n' "$staged" \
-                | grep -vFf <(grep -v '^#' coverage-ratchet-exclude | grep -v '^[[:space:]]*$'))
+              _excl=$(mktemp)
+              grep -v '^#' coverage-ratchet-exclude | grep -v '^[[:space:]]*$' > "$_excl"
+              staged=$(printf '%s\n' "$staged" | grep -vFf "$_excl")
+              rm -f "$_excl"
             fi
             if [ -n "$staged" ]; then
               node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
@@ -87,8 +89,10 @@ pre-commit:
               | grep -E '^src/.*\.(ts|tsx)$' \
               | grep -Ev '(^src/test/|\.(test|spec)\.(ts|tsx)$)')
             if [ -f "coverage-e2e-ratchet-exclude" ]; then
-              staged=$(printf '%s\n' "$staged" \
-                | grep -vFf <(grep -v '^#' coverage-e2e-ratchet-exclude | grep -v '^[[:space:]]*$'))
+              _excl=$(mktemp)
+              grep -v '^#' coverage-e2e-ratchet-exclude | grep -v '^[[:space:]]*$' > "$_excl"
+              staged=$(printf '%s\n' "$staged" | grep -vFf "$_excl")
+              rm -f "$_excl"
             fi
             if [ -n "$staged" ]; then
               node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
