@@ -49,3 +49,6 @@ pre-commit:
     ts-size-cap:
       glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
       run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'
+    ts-test-size-cap:
+      glob: "*.{test,spec}.{ts,tsx,js,jsx}"
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" test-size-cap {staged_files}'
