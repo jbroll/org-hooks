@@ -58,7 +58,13 @@ On fail the commit is aborted with a per-file reason.
 **Staged-file filter** (applied by sci.yml via `git diff --cached`):
 - `^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$`
 - excludes `src/test/`, `*.test.*`, `*.spec.*`
-- per-repo extra excludes: `COVERAGE_RATCHET_EXCLUDE` / `COVERAGE_E2E_RATCHET_EXCLUDE` (grep -Ev pattern, set via lefthook.yml env:)
+- per-repo additional excludes: create `coverage-ratchet-exclude` / `coverage-e2e-ratchet-exclude` in the repo root — one path per line, `#` comments supported
+
+Example `coverage-e2e-ratchet-exclude`:
+```
+# GPS hardware interface — snap logic requires real GPS; can't reach 75% in E2E
+src/components/MapView/hooks/useGpsSnap.ts
+```
 
 **Env var overrides**: `COVERAGE_LCOV`, `COVERAGE_BASELINE`, `COVERAGE_E2E_LCOV`,
 `COVERAGE_E2E_BASELINE`, `COVERAGE_FLOOR` (0–1, default 0.75).
