@@ -1,18 +1,22 @@
 # Coverage ratchet profile. Opt in by adding profiles/coverage.yml to your
-# remotes: configs. Include alongside profiles/sci.yml when using simple-ci
-# (sci.yml syncs both lcov files from CI so the ratchets always have fresh data).
+# remotes: configs. Include alongside profiles/sci.yml when using simple-ci.
+#
+# When sci.yml is also included, these commands are no-ops — sci.yml runs the
+# ratchet inline after retrieving fresh lcov from the CI host, which guarantees
+# the check runs against current-commit coverage.  These commands activate only
+# for repos without sci (i.e. when /home/john/src/simple-ci/sci is not present),
+# where npm run test:coverage / test:e2e runs locally and lcov is already on disk
+# before the ratchet fires.
 #
 # Two independent ratchets — opt into each by creating the matching baseline file:
 #
 #   coverage-ratchet      unit/node ratchet
 #     baseline:  coverage-baseline.json        (default; COVERAGE_BASELINE overrides)
 #     lcov:      coverage/lcov.info            (default; COVERAGE_LCOV overrides)
-#     fires after unit-tests completes
 #
 #   coverage-ratchet-e2e  browser/E2E ratchet
 #     baseline:  coverage-e2e-baseline.json    (default; COVERAGE_E2E_BASELINE overrides)
 #     lcov:      coverage/e2e/lcov.info        (default; COVERAGE_E2E_LCOV overrides)
-#     fires after e2e-tests completes
 #
 # Both ratchets are a no-op when their baseline file does not exist or is empty,
 # so you can enable them independently.  COVERAGE_FLOOR (default 0.75) applies to both.
@@ -23,19 +27,8 @@
 #   3. The baseline is populated automatically on the first passing run.
 #
 # To enable E2E ratchet:
-#   1. Instrument your Playwright run with V8 coverage (e.g. monocart-reporter
-#      or @playwright/test with coverage fixtures) producing an lcov.info.
+#   1. Instrument your Playwright run with V8 coverage producing an lcov.info.
 #   2. Create coverage-e2e-baseline.json (empty: {"version":1,"files":{}}).
-#
-# Override glob and/or env vars in your repo's lefthook.yml for finer control:
-#
-#   pre-commit:
-#     commands:
-#       coverage-ratchet-e2e:
-#         glob: "src/{admin,site}/**/*.ts"
-#         env:
-#           COVERAGE_E2E_LCOV: coverage/e2e/lcov.info
-#           COVERAGE_E2E_BASELINE: scripts/coverage-baseline.json
 #
 # Force-seed: to accept current lcov as the new baseline after a large refactor:
 #   node <ORG_HOOKS>/scripts/coverage-ratchet.mjs --seed \
@@ -47,6 +40,10 @@ pre-commit:
       depends_on: [unit-tests]
       glob: "src/**/*.{ts,tsx,js,jsx,mjs,cjs}"
       run: |
+        # sci.yml handles this inline after lcov retrieval — skip here to avoid
+        # checking stale lcov in parallel with the unit-tests command.
+        SCI=/home/john/src/simple-ci/sci
+        if test -x "$SCI"; then exit 0; fi
         LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
         BASELINE=${COVERAGE_BASELINE:-coverage-baseline.json}
         if [ ! -f "$BASELINE" ]; then exit 0; fi
@@ -60,6 +57,10 @@ pre-commit:
       depends_on: [e2e-tests]
       glob: "src/**/*.{ts,tsx,js,jsx,mjs,cjs}"
       run: |
+        # sci.yml handles this inline after lcov retrieval — skip here to avoid
+        # checking stale lcov in parallel with the e2e-tests command.
+        SCI=/home/john/src/simple-ci/sci
+        if test -x "$SCI"; then exit 0; fi
         LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
         BASELINE=${COVERAGE_E2E_BASELINE:-coverage-e2e-baseline.json}
         if [ ! -f "$BASELINE" ]; then exit 0; fi

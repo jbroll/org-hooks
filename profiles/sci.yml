@@ -8,10 +8,17 @@
 #                <worktree-basename>/ci/e2e-smoke
 #   fallbacks:   npm run test:coverage  /  npm run test:e2e
 #
-# Coverage ratchet: when profiles/coverage.yml is also included, this profile
-# syncs lcov files from the CI host after each dispatched job so both ratchets
-# (unit and e2e) always have fresh data. The syncs are safe no-ops when
-# coverage.yml is not included.
+# Coverage ratchet: when profiles/coverage.yml is also included, the ratchet
+# runs inline here — AFTER lcov is retrieved from the CI host — so it always
+# checks fresh data.  lefthook v2 does not honour depends_on ordering, so we
+# cannot rely on a separate ratchet command running after this one.
+#
+# Ratchet staged-file filtering uses git diff --cached with sensible defaults:
+#   glob:    ^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$
+#   exclude: src/test/, *.test.*, *.spec.*
+# Per-project overrides (additional grep -Ev pattern):
+#   COVERAGE_RATCHET_EXCLUDE     — extra excludes for unit ratchet
+#   COVERAGE_E2E_RATCHET_EXCLUDE — extra excludes for E2E ratchet
 #
 # Override e2e-tests glob in your lefthook.yml to narrow to frontend files only.
 
@@ -26,15 +33,28 @@ pre-commit:
           job=$("$SCI" push "${WT}/ci/test")
           echo "  unit queued ($job)"
           "$SCI" wait "$job"; rc=$?
-          # Sync lcov from CI host so the coverage-ratchet command (profiles/coverage.yml)
-          # has fresh data. Uses 'sci path' to get the actual worktree location from the
-          # server — avoids hardcoding the CI_WORKTREES directory.
+          # Retrieve fresh lcov from the CI host before running the ratchet.
+          # The ratchet must run here — after this sync — to check current coverage.
           LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
           if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
             worktree=$("$SCI" path "$job" 2>/dev/null)
             if [ -n "$worktree" ]; then
               mkdir -p "$(dirname "$LCOV")"
               scp -q "$ci_host:$worktree/$LCOV" "$LCOV" 2>/dev/null || true
+            fi
+          fi
+          # Run coverage ratchet inline against the just-retrieved lcov.
+          BASELINE=${COVERAGE_BASELINE:-coverage-baseline.json}
+          if [ -f "$BASELINE" ] && [ -f "$LCOV" ] && [ -n "${ORG_HOOKS:-}" ]; then
+            staged=$(git diff --cached --name-only --diff-filter=ACMR \
+              | grep -E '^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$' \
+              | grep -Ev '(^src/test/|\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$)')
+            if [ -n "${COVERAGE_RATCHET_EXCLUDE:-}" ]; then
+              staged=$(printf '%s\n' "$staged" | grep -Ev "$COVERAGE_RATCHET_EXCLUDE")
+            fi
+            if [ -n "$staged" ]; then
+              node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
+                --lcov "$LCOV" --baseline "$BASELINE" $staged || exit 1
             fi
           fi
           exit $rc
@@ -50,15 +70,27 @@ pre-commit:
           job=$("$SCI" push "${WT}/ci/e2e-smoke")
           echo "  e2e  queued ($job)"
           "$SCI" wait "$job"; rc=$?
-          # Sync e2e lcov from CI host so the coverage-ratchet-e2e command
-          # (profiles/coverage.yml) has fresh data. Uses 'sci path' to get the
-          # actual worktree location — avoids hardcoding CI_WORKTREES.
+          # Retrieve fresh E2E lcov from the CI host before running the ratchet.
           E2E_LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
           if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
             worktree=$("$SCI" path "$job" 2>/dev/null)
             if [ -n "$worktree" ]; then
               mkdir -p "$(dirname "$E2E_LCOV")"
               scp -q "$ci_host:$worktree/$E2E_LCOV" "$E2E_LCOV" 2>/dev/null || true
+            fi
+          fi
+          # Run E2E coverage ratchet inline against the just-retrieved lcov.
+          E2E_BASELINE=${COVERAGE_E2E_BASELINE:-coverage-e2e-baseline.json}
+          if [ -f "$E2E_BASELINE" ] && [ -f "$E2E_LCOV" ] && [ -n "${ORG_HOOKS:-}" ]; then
+            staged=$(git diff --cached --name-only --diff-filter=ACMR \
+              | grep -E '^src/.*\.(ts|tsx)$' \
+              | grep -Ev '(^src/test/|\.(test|spec)\.(ts|tsx)$)')
+            if [ -n "${COVERAGE_E2E_RATCHET_EXCLUDE:-}" ]; then
+              staged=$(printf '%s\n' "$staged" | grep -Ev "$COVERAGE_E2E_RATCHET_EXCLUDE")
+            fi
+            if [ -n "$staged" ]; then
+              node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
+                --lcov "$E2E_LCOV" --baseline "$E2E_BASELINE" $staged || exit 1
             fi
           fi
           exit $rc
