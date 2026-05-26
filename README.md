@@ -20,9 +20,9 @@ here.
 
 | File | Hook(s) | Contents |
 |---|---|---|
-| `lefthook-common.yml` | pre-commit, commit-msg, pre-merge-commit | secret scan (gitleaks), hygiene (large files / conflict markers / EOF), commit-msg lint (gitlint), linear-history guard |
+| `lefthook-common.yml` | pre-commit, pre-merge-commit | secret scan (gitleaks), hygiene (large files / conflict markers / EOF), linear-history guard |
 | `lefthook-push.yml` | pre-push | language-agnostic push gates |
-| `profiles/ts.yml` | adds to pre-commit/pre-push | Biome (staged) · tsc · knip · dpdm · duplicate-type scan · no-reexports · size-cap |
+| `profiles/ts.yml` | adds to pre-commit | Biome (staged) · tsc · knip · dpdm · duplicate-type scan · no-reexports · size-cap |
 | `profiles/python.yml` | adds to pre-commit/pre-push | ruff format+lint (staged) · mypy · vulture · deptry · size-cap |
 | `profiles/specs.yml` | pre-commit/post-commit | AI-Roller `air check` / artifact-drift (ai-roller only) |
 | `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e; syncs lcov from CI host; runs coverage ratchet inline after sync |
@@ -75,9 +75,14 @@ Duplicate keys after path normalisation (e.g. stale `localhost-NNNN/src/...`
 entries alongside `src/...`) collapse to the max on read.
 
 **Staged-file filter** (applied by sci.yml via `git diff --cached`):
-- `^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$`
-- excludes `src/test/`, `*.test.*`, `*.spec.*`
-- per-repo additional excludes: create `coverage-ratchet-exclude` / `coverage-e2e-ratchet-exclude` in the repo root — one path per line, `#` comments supported
+
+| ratchet | glob |
+|---|---|
+| unit | `^src/.*\.(ts\|tsx\|js\|jsx\|mjs\|cjs)$` |
+| e2e | `^src/.*\.(ts\|tsx)$` |
+
+Both exclude `src/test/`, `*.test.*`, `*.spec.*`.
+Per-repo additional excludes: create `coverage-ratchet-exclude` / `coverage-e2e-ratchet-exclude` in the repo root — one path per line, `#` comments supported.
 
 Example `coverage-e2e-ratchet-exclude`:
 ```
@@ -107,7 +112,6 @@ node <ORG_HOOKS>/scripts/coverage-ratchet.mjs --seed \
 | gitleaks | secret scanning | release binary → `~/.local/bin` |
 | ruff | Python format+lint | (already present) `~/.local/bin` |
 | mypy | Python type check | `uv tool install mypy` |
-| gitlint | commit-msg lint | `uv tool install gitlint` |
 | typos | spell check (optional) | `cargo install typos-cli` |
 
 Per-repo JS tools (Biome/knip/dpdm/typescript) are pinned as repo
