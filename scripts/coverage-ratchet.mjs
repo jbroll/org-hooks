@@ -4,39 +4,49 @@
 // regresses; rewrites the baseline with current numbers on pass and
 // re-stages it so the improvement travels with the commit.
 //
+// Baseline format (v2): { version: 2, files: { "<path>": <percent> } }
+// where <percent> is line coverage 0-100 with 2 decimals.
+//
 // Per-file rules:
-//   1. New file (not in baseline and not yet in HEAD): must reach >= FLOOR.
-//   2. Existing file at >= FLOOR in baseline: must stay at >= FLOOR.
-//   3. Existing file below FLOOR in baseline: uncovered-line count must
-//      not increase (new covered lines are fine; new uncovered lines are not).
+//   1. File not in baseline: must reach >= FLOOR (covers both brand-new files
+//      and ones never previously measured).
+//   2. File in baseline: current % must be >= baseline % within TOLERANCE pp.
+//
+// Bootstrap: when the baseline file does not exist on disk, the first run
+// auto-seeds from the current lcov (exit 0). Subsequent commits then have
+// something to ratchet against.
+//
+// Path normalisation: duplicate keys after stripping browser-coverage
+// "localhost-NNNN/" prefixes collapse to the max — handles stale entries.
 //
 // Usage:
 //   node coverage-ratchet.mjs [options] [staged_file ...]
 //
 //   --lcov PATH       lcov.info to read (default: $COVERAGE_LCOV or coverage/lcov.info)
-//   --baseline PATH   baseline JSON to compare against (default: $COVERAGE_BASELINE
-//                     or coverage-baseline.json)
-//   --floor N         0–1 floor for new/above-floor files (default: $COVERAGE_FLOOR or 0.75)
+//   --baseline PATH   baseline JSON (default: $COVERAGE_BASELINE or coverage-baseline.json)
+//   --floor N         0–1 floor for files without a baseline entry
+//                     (default: $COVERAGE_FLOOR or 0.75)
+//   --tolerance N     0–1 slack vs baseline % to absorb coverage-instrument noise
+//                     (default: $COVERAGE_TOLERANCE or 0.005 = 0.5 pp)
 //   --src-root DIR    strip path prefix up to this dir name when normalising lcov
 //                     SF: paths (default: src)
 //   --seed            write current lcov to baseline unconditionally; no gate check.
-//                     Use after a large refactor to accept the current state as the
-//                     new floor. Requires lcov to exist; ignores staged_file list.
+//                     Use to reset after a refactor. Requires lcov to exist;
+//                     ignores staged_file list.
 //
 // Exit codes:  0 = pass  1 = coverage regression  2 = setup error (missing lcov)
-//
-// Design notes:
-//   - No-op (exit 0) when no staged files are passed.
-//   - No-op (exit 0) when baseline does not exist or is empty — the baseline
-//     is written fresh from the current lcov on first run.
-//   - Exit 2 (setup error, not a coverage failure) when the baseline exists
-//     and has entries but the lcov file is missing.
-//   - Paths in lcov SF: records are normalised to be relative to CWD.
-//     Absolute paths are stripped up to the first occurrence of /<src-root>/.
 
 import { execSync } from "node:child_process";
 import fs from "node:fs";
-import path from "node:path";
+import {
+  checkOne,
+  fmtPct,
+  formatBaseline,
+  parseBaseline,
+  parseLcov,
+  pct,
+  ratchetUp,
+} from "./coverage-ratchet-lib.mjs";
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -45,6 +55,7 @@ import path from "node:path";
 let lcovPath = process.env.COVERAGE_LCOV ?? "coverage/lcov.info";
 let baselinePath = process.env.COVERAGE_BASELINE ?? "coverage-baseline.json";
 let floor = Number(process.env.COVERAGE_FLOOR ?? "0.75");
+let tolerance = Number(process.env.COVERAGE_TOLERANCE ?? "0.005");
 let srcRoot = "src";
 let seedMode = false;
 /** @type {string[]} */
@@ -55,6 +66,7 @@ for (let i = 2; i < process.argv.length; i++) {
   if (arg === "--lcov") lcovPath = process.argv[++i];
   else if (arg === "--baseline") baselinePath = process.argv[++i];
   else if (arg === "--floor") floor = Number(process.argv[++i]);
+  else if (arg === "--tolerance") tolerance = Number(process.argv[++i]);
   else if (arg === "--src-root") srcRoot = process.argv[++i];
   else if (arg === "--seed") seedMode = true;
   else if (!arg.startsWith("--")) stagedFiles.push(arg);
@@ -63,26 +75,27 @@ for (let i = 2; i < process.argv.length; i++) {
 if (!seedMode && stagedFiles.length === 0) process.exit(0);
 
 // ---------------------------------------------------------------------------
-// Baseline
+// Baseline I/O
 // ---------------------------------------------------------------------------
 
-/**
- * @typedef {{ linesFound: number; linesHit: number }} FileMetric
- * @typedef {{ version: 1; files: Record<string, FileMetric> }} Baseline
- */
+const baselineExists = fs.existsSync(baselinePath);
+/** @type {Record<string, number>} */
+const baseline = baselineExists
+  ? parseBaseline(JSON.parse(fs.readFileSync(baselinePath, "utf8")), srcRoot)
+  : {};
 
-/** @returns {Baseline} */
-function readBaseline() {
-  if (!fs.existsSync(baselinePath)) return { version: 1, files: {} };
-  const raw = fs.readFileSync(baselinePath, "utf8");
-  const parsed = /** @type {Baseline} */ (JSON.parse(raw));
-  if (parsed.version !== 1)
-    throw new Error(`${baselinePath}: unsupported version ${parsed.version}`);
-  return parsed;
+function writeBaseline(/** @type {Record<string, number>} */ files) {
+  fs.writeFileSync(baselinePath, formatBaseline(files));
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      execSync(`git add ${baselinePath}`, { stdio: "ignore" });
+      return;
+    } catch {
+      if (attempt === 3) throw new Error(`Failed to stage ${baselinePath} after 3 attempts`);
+      execSync("sleep 1");
+    }
+  }
 }
-
-const baseline = readBaseline();
-const baselineIsEmpty = Object.keys(baseline.files).length === 0;
 
 // ---------------------------------------------------------------------------
 // lcov
@@ -93,161 +106,25 @@ if (!fs.existsSync(lcovPath)) {
     console.error(`coverage ratchet --seed: ${lcovPath} not found — run tests with coverage first`);
     process.exit(2);
   }
-  if (!baselineIsEmpty) {
-    console.error(
-      `coverage ratchet: ${lcovPath} not found — run \`npm run test:coverage\` first`,
-    );
+  if (baselineExists && Object.keys(baseline).length > 0) {
+    console.error(`coverage ratchet: ${lcovPath} not found — run \`npm run test:coverage\` first`);
     process.exit(2);
   }
-  // No baseline and no lcov: first-run no-op; nothing to compare.
+  // No baseline and no lcov: first-run no-op.
   process.exit(0);
 }
 
-/**
- * Normalise a path from an lcov SF: record to be relative to CWD.
- * Handles absolute paths (server-side coverage), relative paths already
- * relative to CWD, and browser-coverage paths with a hostname:port/ prefix
- * (e.g. localhost-5438/src/...).
- * @param {string} p
- * @returns {string}
- */
-function normalisePath(p) {
-  // Absolute path: strip CWD or find /<srcRoot>/ marker.
-  if (path.isAbsolute(p)) {
-    const cwd = process.cwd() + path.sep;
-    if (p.startsWith(cwd)) return p.slice(cwd.length);
-    const marker = `${path.sep}${srcRoot}${path.sep}`;
-    const idx = p.indexOf(marker);
-    if (idx !== -1) return p.slice(idx + 1);
-    return p;
-  }
-  // Relative path: strip browser-coverage hostname:port/ prefix
-  // (e.g. "localhost-5438/src/..." → "src/...").
-  const marker = `/${srcRoot}/`;
-  const idx = p.indexOf(marker);
-  if (idx !== -1) return p.slice(idx + 1);
-  return p;
-}
-
-/** @returns {Record<string, FileMetric>} */
-function parseLcov(text) {
-  /** @type {Record<string, FileMetric>} */
-  const out = {};
-  let sf = /** @type {string|null} */ (null);
-  let lf = 0;
-  let lh = 0;
-  for (const line of text.split("\n")) {
-    if (line.startsWith("SF:")) {
-      sf = normalisePath(line.slice(3).trim());
-      lf = 0;
-      lh = 0;
-    } else if (line.startsWith("LF:")) {
-      lf = Number(line.slice(3));
-    } else if (line.startsWith("LH:")) {
-      lh = Number(line.slice(3));
-    } else if (line === "end_of_record" && sf) {
-      out[sf] = { linesFound: lf, linesHit: lh };
-      sf = null;
-    }
-  }
-  return out;
-}
-
-const lcov = parseLcov(fs.readFileSync(lcovPath, "utf8"));
+const lcov = parseLcov(fs.readFileSync(lcovPath, "utf8"), srcRoot);
 
 // ---------------------------------------------------------------------------
-// Per-file check
+// Seed mode (explicit or auto)
 // ---------------------------------------------------------------------------
 
-/** @param {FileMetric} m @returns {number} */
-function pct(m) {
-  return m.linesFound === 0 ? 1 : m.linesHit / m.linesFound;
-}
-/** @param {FileMetric} m @returns {number} */
-function uncovered(m) {
-  return m.linesFound - m.linesHit;
-}
-/** @param {number} p @returns {string} */
-function fmtPct(p) {
-  return `${(p * 100).toFixed(2)}%`;
-}
-
-/** @param {string} filePath @returns {boolean} */
-function existedInHead(filePath) {
-  try {
-    execSync(`git cat-file -e HEAD:${filePath}`, { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * @param {string} file
- * @param {FileMetric|undefined} prev
- * @param {FileMetric|undefined} cur
- * @returns {{ file: string; reason: string }|null}
- */
-function checkOne(file, prev, cur) {
-  const inHead = existedInHead(file);
-
-  if (!inHead) {
-    // New file — must reach the floor.
-    if (!cur)
-      return {
-        file,
-        reason: "new file not exercised by tests (no entry in lcov)",
-      };
-    if (pct(cur) < floor)
-      return {
-        file,
-        reason: `new file at ${fmtPct(pct(cur))} (${cur.linesHit}/${cur.linesFound}); must be ≥ ${fmtPct(floor)}`,
-      };
-    return null;
-  }
-
-  if (!cur) {
-    // File no longer appears in lcov.
-    if (prev)
-      return {
-        file,
-        reason: "previously measured but absent from current lcov — regressed to 0",
-      };
-    return null; // Never measured; tolerate.
-  }
-
-  if (!prev) return null; // First time seeing it; accept and ratchet from here.
-
-  if (pct(prev) >= floor) {
-    // Was at or above the floor — must stay there.
-    if (pct(cur) < floor)
-      return {
-        file,
-        reason: `regressed below floor: was ${fmtPct(pct(prev))}, now ${fmtPct(pct(cur))}`,
-      };
-    return null;
-  }
-
-  // Was below the floor — uncovered-line count must not increase.
-  if (uncovered(cur) > uncovered(prev))
-    return {
-      file,
-      reason: `more uncovered lines: ${uncovered(prev)} → ${uncovered(cur)} (${fmtPct(pct(prev))} → ${fmtPct(pct(cur))})`,
-    };
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Seed mode — accept current lcov as baseline unconditionally
-// ---------------------------------------------------------------------------
-
-if (seedMode) {
-  const next = { version: 1, files: /** @type {Record<string, FileMetric>} */ ({}) };
-  for (const [file, metric] of Object.entries(lcov)) next.files[file] = metric;
-  fs.writeFileSync(baselinePath, `${JSON.stringify(next, null, 2)}\n`);
-  execSync(`git add ${baselinePath}`, { stdio: "ignore" });
-  const count = Object.keys(next.files).length;
-  console.log(`coverage ratchet --seed: wrote ${count} files to ${baselinePath}`);
+if (seedMode || !baselineExists) {
+  const next = ratchetUp({}, lcov);
+  writeBaseline(next);
+  const label = seedMode ? "--seed" : "auto-seed (no baseline)";
+  console.log(`coverage ratchet ${label}: wrote ${Object.keys(next).length} files to ${baselinePath}`);
   process.exit(0);
 }
 
@@ -258,34 +135,18 @@ if (seedMode) {
 /** @type {{ file: string; reason: string }[]} */
 const failures = [];
 for (const file of stagedFiles) {
-  const fail = checkOne(file, baseline.files[file], lcov[file]);
+  const fail = checkOne(file, baseline[file], lcov[file], { floor, tolerance });
   if (fail) failures.push(fail);
 }
 
 if (failures.length > 0) {
   console.error("coverage ratchet failed:");
   for (const f of failures) console.error(`  ${f.file}: ${f.reason}`);
-  console.error(
-    "\nAdd test coverage for the affected lines before committing.",
-  );
+  console.error("\nAdd test coverage for the affected lines before committing.");
   process.exit(1);
 }
 
-// Pass: absorb all current lcov numbers into the baseline (not just staged
-// files — improvements anywhere ratchet up, not just the files you touched).
-const next = { version: 1, files: { ...baseline.files } };
-for (const [file, metric] of Object.entries(lcov)) next.files[file] = metric;
-fs.writeFileSync(baselinePath, `${JSON.stringify(next, null, 2)}\n`);
-// Retry git add up to 3 times — parallel ratchet runs can race on .git/index.lock.
-for (let attempt = 1; attempt <= 3; attempt++) {
-  try {
-    execSync(`git add ${baselinePath}`, { stdio: "ignore" });
-    break;
-  } catch {
-    if (attempt === 3) throw new Error(`Failed to stage ${baselinePath} after 3 attempts`);
-    execSync("sleep 1");
-  }
-}
+writeBaseline(ratchetUp(baseline, lcov));
 
 const summary = stagedFiles
   .map((f) => {
