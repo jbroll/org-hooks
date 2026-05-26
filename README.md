@@ -45,15 +45,34 @@ Two independent ratchets, one per sci command:
 | `unit-tests` | `coverage-baseline.json` | `coverage/lcov.info` |
 | `e2e-tests` | `coverage-e2e-baseline.json` | `coverage/e2e/lcov.info` |
 
-Each ratchet is a no-op when its baseline file does not exist — create the file to opt in.
+Each ratchet auto-seeds on first run — if the baseline file does not exist, the
+first invocation writes it from current lcov and exits 0. Subsequent commits
+then have something to ratchet against.
+
+**Baseline format (v2)** — one percentage per file, with sorted keys for clean
+diffs:
+```json
+{
+  "version": 2,
+  "files": {
+    "src/foo.ts": 87.50,
+    "src/bar.ts": 60.42
+  }
+}
+```
 
 Rules (per staged source file, checked against `scripts/coverage-ratchet.mjs`):
-- **New file**: must reach the floor (default 75% lines hit).
-- **Existing file at ≥ floor**: must stay at or above the floor.
-- **Existing file below floor**: uncovered-line count must not increase.
+- **File not in baseline** (brand-new or never tracked): must reach the floor
+  (default 75% lines hit).
+- **File in baseline**: current % must be ≥ baseline % within the tolerance
+  (default 0.5 pp — absorbs noise from coverage-instrument runs).
 
-On pass the baseline is rewritten with current numbers and re-staged with the commit.
+On pass the baseline is rewritten — current % overwrites if it's higher; lower
+runs are ignored (no down-ratchet). The file is re-staged with the commit.
 On fail the commit is aborted with a per-file reason.
+
+Duplicate keys after path normalisation (e.g. stale `localhost-NNNN/src/...`
+entries alongside `src/...`) collapse to the max on read.
 
 **Staged-file filter** (applied by sci.yml via `git diff --cached`):
 - `^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$`
@@ -67,7 +86,12 @@ src/components/MapView/hooks/useGpsSnap.ts
 ```
 
 **Env var overrides**: `COVERAGE_LCOV`, `COVERAGE_BASELINE`, `COVERAGE_E2E_LCOV`,
-`COVERAGE_E2E_BASELINE`, `COVERAGE_FLOOR` (0–1, default 0.75).
+`COVERAGE_E2E_BASELINE`, `COVERAGE_FLOOR` (0–1, default 0.75),
+`COVERAGE_TOLERANCE` (0–1, default 0.005 = 0.5 pp).
+
+**Tests**: pure helpers live in `scripts/coverage-ratchet-lib.mjs`; run the
+suite with `node --test scripts/coverage-ratchet.test.mjs` (uses node:test,
+no external deps).
 
 **Force-seeding** — accept the current lcov as the new baseline after a large refactor:
 ```sh
