@@ -34,9 +34,9 @@ retrieved from the CI host — so it always checks coverage from the current com
 ## Coverage ratchet
 
 The ratchet lives inside `profiles/sci.yml`, not in a separate lefthook command. This
-is intentional: lefthook v2 does not honour `depends_on` ordering, so a separate command
-would run in parallel with the test job and check whatever lcov happened to be on disk.
-By inlining it after the `scp` sync, ordering is enforced by the shell.
+is intentional: lefthook v2 has no command-level ordering that survives `parallel: true`,
+so a separate command would race the test job and check stale lcov.
+By inlining the ratchet after the `scp` sync, ordering is enforced by the shell.
 
 Two independent ratchets, one per sci command:
 

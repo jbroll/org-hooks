@@ -10,8 +10,8 @@
 #
 # Coverage ratchet: runs inline here — AFTER lcov is retrieved from the CI
 # host — so it always checks fresh data from this exact commit.
-# lefthook v2 does not honour depends_on ordering; a separate command would
-# run in parallel and check stale lcov.
+# A separate lefthook command would race the test job (no command-level ordering
+# survives parallel: true), so ordering is enforced by the shell instead.
 #
 # Ratchet staged-file filtering uses git diff --cached with sensible defaults:
 #   glob:    ^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$
