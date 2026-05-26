@@ -79,10 +79,13 @@ if (!seedMode && stagedFiles.length === 0) process.exit(0);
 // ---------------------------------------------------------------------------
 
 const baselineExists = fs.existsSync(baselinePath);
+// Skip parsing in seed mode — we're about to overwrite, and the existing file
+// may be in a legacy format we no longer read.
 /** @type {Record<string, number>} */
-const baseline = baselineExists
-  ? parseBaseline(JSON.parse(fs.readFileSync(baselinePath, "utf8")), srcRoot)
-  : {};
+const baseline =
+  baselineExists && !seedMode
+    ? parseBaseline(JSON.parse(fs.readFileSync(baselinePath, "utf8")), srcRoot)
+    : {};
 
 function writeBaseline(/** @type {Record<string, number>} */ files) {
   fs.writeFileSync(baselinePath, formatBaseline(files));
