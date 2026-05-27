@@ -143,9 +143,66 @@ for (const file of stagedFiles) {
 }
 
 if (failures.length > 0) {
-  console.error("coverage ratchet failed:");
+  // Classify each failure so the user knows what action to take.
+  const dropped = failures.filter((f) => /dropped:/.test(f.reason));
+  const missing = failures.filter((f) => /no entry in lcov/.test(f.reason));
+  const floored = failures.filter((f) => /must be ≥/.test(f.reason));
+  const other = failures.filter(
+    (f) => !dropped.includes(f) && !missing.includes(f) && !floored.includes(f),
+  );
+
+  console.error("coverage ratchet FAILED");
+  console.error("=".repeat(60));
   for (const f of failures) console.error(`  ${f.file}: ${f.reason}`);
-  console.error("\nAdd test coverage for the affected lines before committing.");
+  console.error("");
+
+  // Resolve the exclude file path for this baseline so the message tells the
+  // user exactly which file to edit (unit vs. E2E differs).
+  const baselineDir = baselinePath.includes("e2e") ? "e2e" : "unit";
+  const excludeFile =
+    baselineDir === "e2e" ? "coverage-e2e-ratchet-exclude" : "coverage-ratchet-exclude";
+
+  if (dropped.length > 0) {
+    console.error("ACTION — coverage dropped on these files:");
+    for (const f of dropped) console.error(`  ${f.file}`);
+    console.error(
+      "  → Add test coverage for the newly-uncovered lines, then re-stage and commit.",
+    );
+    console.error(
+      `  → If the new lines are inherently unreachable from this test layer (${baselineDir}),`,
+    );
+    console.error(
+      `    add the file to ${excludeFile} with a one-line reason explaining why.`,
+    );
+    console.error(
+      "  → Do NOT lower the baseline number unless you understand the regression is intended.",
+    );
+    console.error("");
+  }
+
+  if (missing.length > 0) {
+    console.error("ACTION — these files have no entry in lcov (no test imports them):");
+    for (const f of missing) console.error(`  ${f.file}`);
+    console.error("  → Add at least one test that imports the file, OR");
+    console.error(`  → Add the file to ${excludeFile} if it is genuinely untestable here`);
+    console.error("    (CLI shells, type-only files, hardware-specific code, etc.).");
+    console.error("");
+  }
+
+  if (floored.length > 0) {
+    console.error("ACTION — these new files are below the coverage floor:");
+    for (const f of floored) console.error(`  ${f.file}: ${f.reason}`);
+    console.error("  → Add tests to bring coverage above the floor before committing.");
+    console.error("");
+  }
+
+  if (other.length > 0) {
+    console.error("ACTION — unclassified failures (investigate manually):");
+    for (const f of other) console.error(`  ${f.file}: ${f.reason}`);
+    console.error("");
+  }
+
+  console.error("=".repeat(60));
   process.exit(1);
 }
 
