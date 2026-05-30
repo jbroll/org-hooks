@@ -94,7 +94,15 @@ function writeBaseline(/** @type {Record<string, number>} */ files) {
       execSync(`git add ${baselinePath}`, { stdio: "ignore" });
       return;
     } catch {
-      if (attempt === 3) throw new Error(`Failed to stage ${baselinePath} after 3 attempts`);
+      if (attempt === 3) {
+        // The index is busy (concurrent hook commands / parallel sci ratchets).
+        // Don't fail an otherwise-passing commit over a staging race — leave the
+        // baseline modified; it can be re-staged manually if the bump matters.
+        console.error(
+          `coverage ratchet: could not stage ${baselinePath} (git index busy); leaving it modified`,
+        );
+        return;
+      }
       execSync("sleep 1");
     }
   }
@@ -206,7 +214,17 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-writeBaseline(ratchetUp(baseline, lcov));
+// Persist raises for STAGED files only. Using the full lcov here would let a
+// degraded full-suite run (e.g. `vitest --changed` falling back to all tests)
+// silently ratchet up — and auto-commit — baselines for files this commit never
+// touched. Seed mode (above) intentionally writes the whole lcov; this
+// incremental path must not.
+const nextBaseline = { ...baseline };
+for (const f of stagedFiles) {
+  const m = lcov[f];
+  if (m) nextBaseline[f] = Math.max(nextBaseline[f] ?? 0, pct(m));
+}
+writeBaseline(nextBaseline);
 
 const summary = stagedFiles
   .map((f) => {
