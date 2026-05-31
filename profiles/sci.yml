@@ -77,7 +77,7 @@ pre-commit:
         SCI=/home/john/src/simple-ci/sci
         WT=${SCI_WT:-$(basename "$(git rev-parse --show-toplevel)")}
         if test -x "$SCI"; then
-          job=$("$SCI" push "${WT}/ci/e2e-smoke") || exit 1
+          job=$("$SCI" push "${WT}/ci/e2e") || exit 1
           echo "  e2e  queued ($job)"
           # If the commit is interrupted, kill the remote job immediately.
           trap '"$SCI" kill "$job" >/dev/null 2>&1 || true' INT TERM
