@@ -30,6 +30,9 @@ pre-commit:
         SCI=/home/john/src/simple-ci/sci
         WT=${SCI_WT:-$(basename "$(git rev-parse --show-toplevel)")}
         if test -x "$SCI"; then
+          # Let the repo prepare per-commit inputs (e.g. a changed-files manifest
+          # to scope the test run) before the job is rsynced to the CI worktree.
+          [ -x ci/before-test-push ] && ci/before-test-push
           job=$("$SCI" push "${WT}/ci/test") || exit 1
           echo "  unit queued ($job)"
           # If the commit is interrupted, kill the remote job immediately rather
