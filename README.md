@@ -25,7 +25,34 @@ here.
 | `profiles/ts.yml` | adds to pre-commit | Biome (staged) · tsc · knip · dpdm · duplicate-type scan · no-reexports · size-cap |
 | `profiles/python.yml` | adds to pre-commit/pre-push | ruff format+lint (staged) · mypy · vulture · deptry · size-cap |
 | `profiles/specs.yml` | pre-commit/post-commit | AI-Roller `air check` / artifact-drift (ai-roller only) |
-| `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e; syncs lcov from CI host; runs coverage ratchet inline after sync |
+| `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e (flat `commands:` style); syncs lcov from CI host; runs coverage ratchet inline after sync |
+| `profiles/sci-tiered.yml` | pre-commit, pre-merge-commit | **self-contained** tiered fail-fast gate — ALL checks inlined (12 static + 2 GPU); pull ONLY this file with ZERO consumer pre-commit overrides |
+
+## Tiered fail-fast gate (`profiles/sci-tiered.yml`)
+
+A repo that wants a two-tier, fail-fast pre-commit dispatches static checks
+first and only runs the expensive GPU test jobs if every static check passed.
+This profile is **self-contained**: a consumer pulls ONLY `profiles/sci-tiered.yml`
+(not `lefthook-common.yml` / `profiles/ts.yml` / `profiles/sci.yml`) and declares
+NO `pre-commit:` block of its own — its `lefthook.yml` is just `remotes:` + `rc:`.
+
+Why zero overrides: lefthook 2.1.6 cross-config merge is unsafe for this shape —
+a consumer `pre-commit:` block drops the remote's top-level `piped: true` (killing
+fail-fast), and nested-job overrides don't deep-merge. With nothing to merge, the
+tier tree and `piped: true` are used verbatim. Tunables are env vars (sourced from
+the consumer's `rc:`), never config overrides:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `ORG_HOOKS` | — (required) | absolute path to this checkout |
+| `DPDM_CIRCULAR` | `circular:1` | ts-circular exit policy; set `circular:0` for warn-only in repos with known cycles |
+| `SCI_WT` | derived | CI queue name; **not needed** — derived from the git common dir so all worktrees of a repo resolve to the repo dir name |
+| `SCI_BIN` | `/home/john/src/simple-ci/sci` | simple-ci binary; falls back to `npm run test:coverage`/`test:e2e` if absent |
+
+The CI queue name is derived as
+`basename "$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)"` — the
+parent of the shared `.git`. From any worktree (e.g. `repo-wt1`) this resolves to
+the main repo dir (`repo`), so a worktree never pushes to a stray queue.
 
 Heavy tests/coverage/e2e are dispatched to the remote GPU queue via `profiles/sci.yml`.
 The coverage ratchet is inlined at the end of each sci command — after the lcov is

@@ -1,63 +1,56 @@
-# Tiered, fail-fast pre-commit gate (single-file, sci-dispatch repos).
+# Tiered, fail-fast pre-commit gate — ZERO consumer overrides.
 #
-# WHY A SEPARATE FILE — and why everything lives here:
-#   A working two-tier fail-fast gate can't be split across config files or mix
-#   `commands:` and `jobs:`. Verified on lefthook 2.1.6:
-#     • lefthook can't gate a flat `commands:` block behind a `jobs:` tree —
-#       commands run as their own parallel pool alongside the jobs, outside
-#       the tier order.
-#     • Same-named groups defined across different config files don't deep-merge
-#       cleanly.
-#   So EVERY check is defined in this one file's `jobs:` tree.
+# A consumer pulls ONLY this one file in remotes:.configs and adds NO
+# pre-commit block of its own. Everything — every static check, the GPU
+# dispatch, the coverage ratchet, the globs, the CI queue name — is defined
+# here. The consumer's lefthook.yml is just `remotes:` + `rc:`.
 #
-#   The modular packs (lefthook-common.yml, profiles/ts.yml, profiles/sci.yml)
-#   are left intact for repos that prefer the flat `parallel: true` commands
-#   style. A repo wanting tiered fail-fast pulls ONLY this file — it does NOT
-#   also pull profiles/ts.yml etc. (all of those checks are inlined here).
+# ── WHY ZERO OVERRIDES (and why this file is self-contained) ──────────────────
+#   Cross-config merge in lefthook 2.1.6 is treacherous and was the source of
+#   every prior breakage. Verified facts:
+#     • A hook can't mix `commands:` and `jobs:` — if both appear, commands win
+#       and jobs are ignored. Tiering REQUIRES `jobs:`, so EVERY check is a job.
+#     • A top-level `jobs:` list runs sequentially but is NOT fail-fast — a
+#       failed job does not stop the next. Neither does `parallel: false`.
+#       The ONLY setting that stops on first failure is `piped: true`.
+#     • When a consumer adds its own `pre-commit:` block, lefthook DROPS the
+#       remote hook's top-level `piped: true` — silently killing fail-fast.
+#     • A consumer override does NOT deep-merge into a remote nested job's
+#       run/glob; and a second override layer leaks nested jobs to the top
+#       level and breaks gating.
+#   The robust fix for ALL of the above is to have NOTHING to merge: the
+#   consumer declares no pre-commit jobs, so `piped: true` and the tier tree
+#   below are used verbatim. Tunable bits are exposed as ENV VARS (read at run
+#   time, sourced from the consumer's rc:) instead of config overrides.
 #
-# STRUCTURE — fail-fast is `piped: true`, NOT plain sequential:
-#   IMPORTANT (verified on lefthook 2.1.6): a top-level `jobs:` list runs its
-#   entries sequentially BUT is NOT fail-fast — a failed job does not stop the
-#   next one. Neither does `parallel: false`. The ONLY top-level setting that
-#   stops the run on first failure is `piped: true` ("broken pipe → skip rest").
-#   So this hook sets `piped: true`:
-#     1. tier1-static — all fast local static/hygiene checks (inner group is
-#        `parallel: true`, so they run concurrently; all run even if one fails).
-#     2. tier2-gpu    — expensive simple-ci unit + e2e dispatch (also parallel).
-#   tier2-gpu runs ONLY if EVERY tier1-static job passed. A 0.02s lint/type
-#   failure therefore never dispatches (or waits on) the ~2-min GPU jobs.
+# ── STRUCTURE ─────────────────────────────────────────────────────────────────
+#   pre-commit (piped: true)
+#     1. tier1-static — group(parallel: true): 12 fast local checks. All run
+#        even if one fails (so you see every problem), but the GROUP's exit is
+#        nonzero if any failed, which breaks the pipe.
+#     2. tier2-gpu    — group(parallel: true): unit-tests + e2e-tests sci
+#        dispatch. Runs ONLY if tier1-static fully passed. A 0.02s lint/type
+#        failure therefore never dispatches (or waits on) a ~2-min GPU job.
 #
-# CONSUMER OVERRIDES — and a HARD REQUIREMENT about `piped`:
-#   Override a nested job's glob/env/run by re-declaring it by name inside the
-#   matching group; unset fields are preserved from here. BUT when a consumer
-#   adds a `pre-commit:` override block, lefthook DROPS the remote hook's
-#   top-level `piped: true` (verified 2.1.6) — so the consumer MUST re-declare
-#   `piped: true` in its own `pre-commit:` block, or fail-fast silently breaks.
-#   Likewise, only ONE override layer is safe: a second nested-job override
-#   (e.g. a lefthook-local.yml also touching these jobs) leaks jobs to the top
-#   level and breaks gating — keep ALL repo overrides in the committed
-#   lefthook.yml. Example (wicketmap):
-#     pre-commit:
-#       piped: true            # REQUIRED — re-declare or fail-fast is lost
-#       jobs:
-#         - name: tier1-static
-#           group:
-#             jobs:
-#               - name: ts-circular
-#                 run: >- ...            # warn-only override
-#         - name: tier2-gpu
-#           group:
-#             jobs:
-#               - name: unit-tests
-#                 glob: "..."            # widen/narrow trigger
-#                 env: { SCI_WT: wicketmap }
+# ── ENV KNOBS (export from the consumer's rc: file; all optional) ─────────────
+#   ORG_HOOKS        REQUIRED — absolute path to this org-hooks checkout.
+#   SCI_WT           Override the CI queue name. NOT needed: the queue is
+#                    derived from the git COMMON dir (see WT= below), so every
+#                    worktree of a repo resolves to the repo's own dir name.
+#   DPDM_CIRCULAR    dpdm --exit-code policy for ts-circular. Default
+#                    "circular:1" (a cycle fails the commit). A repo with
+#                    pre-existing cycles through barrels exports "circular:0"
+#                    (warn-only) from its rc: until the cycles are cleaned up.
+#   SCI_BIN          Path to the simple-ci binary (default below). Falls back
+#                    to `npm run test:coverage` / `test:e2e` if not executable.
+#   COVERAGE_* / COVERAGE_E2E_*  ratchet lcov/baseline/floor/tolerance paths.
 #
-# Requires ORG_HOOKS exported by the repo's rc: (lefthook-rc.sh).
-# Required npm scripts in the consumer: type-check, knip.
+# Required npm scripts in the consumer: type-check, knip, and (for the sci
+# fallback path) test:coverage, test:e2e.
 
 pre-commit:
-  # Fail-fast across tiers: a failure in tier1-static breaks the pipe and
-  # tier2-gpu is skipped. See header — this is the ONLY working mechanism.
+  # Fail-fast across tiers: any tier1 failure breaks the pipe → tier2 skipped.
+  # This is the ONLY mechanism that gates tier2 behind tier1 (verified 2.1.6).
   piped: true
   jobs:
     # ── Tier 1 — fast, local, parallel. All must pass before Tier 2. ─────────
@@ -65,7 +58,7 @@ pre-commit:
       group:
         parallel: true
         jobs:
-          # hygiene + secrets (from lefthook-common.yml)
+          # hygiene + secrets
           - name: secrets
             run: gitleaks git --pre-commit --staged --redact --no-banner
           - name: large-files
@@ -74,7 +67,7 @@ pre-commit:
             run: '"${ORG_HOOKS}/scripts/hygiene.sh" conflict-markers {staged_files}'
           - name: eof-whitespace
             run: '"${ORG_HOOKS}/scripts/hygiene.sh" eof-ws {staged_files}'
-          # TypeScript static analysis (from profiles/ts.yml)
+          # TypeScript static analysis
           - name: ts-format-lint
             glob: "*.{ts,tsx,js,jsx,mjs,cjs,json}"
             run: npx --no-install biome check --staged --no-errors-on-unmatched
@@ -84,12 +77,9 @@ pre-commit:
           - name: ts-deadcode
             glob: "*.{ts,tsx,json}"
             run: npm run knip
-          # ts-circular: exit policy is env-parameterized so consumers can relax
-          # it to warn-only WITHOUT overriding `run` — lefthook 2.1.6 does NOT
-          # merge a consumer's `run` override into a remote nested job (only new
-          # fields like `env` merge). A repo with pre-existing cycles sets
-          #   env: { DPDM_CIRCULAR: "circular:0" }
-          # on this job in its lefthook.yml. Default circular:1 = hard fail.
+          # ts-circular: exit policy is the DPDM_CIRCULAR env var (default
+          # strict). A repo with known cycles relaxes it WITHOUT touching config
+          # by exporting DPDM_CIRCULAR=circular:0 from its rc: file.
           - name: ts-circular
             glob: "*.{ts,tsx}"
             run: >-
@@ -113,30 +103,34 @@ pre-commit:
       group:
         parallel: true
         jobs:
-          # NOTE: no `glob:` here on purpose. lefthook 2.1.6 merges nested-group
-          # jobs by name but keeps the FIRST-defined value of each field — so a
-          # remote `glob:` would WIN over the consumer's and the consumer's would
-          # be silently ignored (verified). By omitting glob here, the consumer's
-          # glob (in its lefthook.yml override) is authoritative. A consumer that
-          # pulls this profile MUST set unit-tests/e2e-tests globs, or these jobs
-          # run on every commit. (run/env DO merge from the consumer; glob does not.)
+          # Globs are baked in here as sensible defaults so the consumer needs
+          # NO override. unit-tests fires for any source/test change that could
+          # move coverage; e2e-tests is narrowed to frontend source ({src,
+          # packages,ci}) so backend/scripts-only commits skip the browser
+          # suite. lefthook globs are static config (they can't read env), so a
+          # repo needing different scoping changes them here, not via a config
+          # override that would re-break the merge invariants above.
           - name: unit-tests
+            glob: "{src,packages,backend,scripts,ci}/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}"
             run: |
-              SCI=/home/john/src/simple-ci/sci
-              WT=${SCI_WT:-$(basename "$(git rev-parse --show-toplevel)")}
+              SCI=${SCI_BIN:-/home/john/src/simple-ci/sci}
+              # CI queue name = the repo's own dir, derived from the git COMMON
+              # dir so EVERY worktree (and the main checkout) resolves to the
+              # same queue. No SCI_WT override needed. --git-common-dir is the
+              # shared .git (absolute here); its parent dir's basename is the repo.
+              WT=${SCI_WT:-$(basename "$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)")}
               if test -x "$SCI"; then
-                # Let the repo prepare per-commit inputs (e.g. a changed-files manifest
-                # to scope the test run) before the job is rsynced to the CI worktree.
+                # Let the repo prepare per-commit inputs (e.g. a changed-files
+                # manifest to scope the test run) before the job is rsynced.
                 [ -x ci/before-test-push ] && ci/before-test-push
                 job=$("$SCI" push "${WT}/ci/test") || exit 1
                 echo "  unit queued ($job)"
-                # If the commit is interrupted, kill the remote job immediately rather
-                # than leaving it to run (and a later push to supersede it).
+                # If the commit is interrupted, kill the remote job immediately.
                 trap '"$SCI" kill "$job" >/dev/null 2>&1 || true' INT TERM
                 "$SCI" wait "$job"; rc=$?
                 trap - INT TERM
-                # Retrieve fresh lcov from the CI host before running the ratchet.
-                # The ratchet must run here — after this sync — to check current coverage.
+                # Retrieve fresh lcov from the CI host before the ratchet so it
+                # always checks coverage from THIS commit.
                 LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
                 if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
                   worktree=$("$SCI" path "$job" 2>/dev/null)
@@ -166,19 +160,18 @@ pre-commit:
               else
                 npm run test:coverage
               fi
-          # See unit-tests note: no `glob:` here so the consumer's glob wins.
           - name: e2e-tests
+            glob: "{src,packages,ci}/**/*.{ts,tsx,mjs,cjs,css}"
             run: |
-              SCI=/home/john/src/simple-ci/sci
-              WT=${SCI_WT:-$(basename "$(git rev-parse --show-toplevel)")}
+              SCI=${SCI_BIN:-/home/john/src/simple-ci/sci}
+              WT=${SCI_WT:-$(basename "$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)")}
               if test -x "$SCI"; then
                 job=$("$SCI" push "${WT}/ci/e2e-smoke") || exit 1
                 echo "  e2e  queued ($job)"
-                # If the commit is interrupted, kill the remote job immediately.
                 trap '"$SCI" kill "$job" >/dev/null 2>&1 || true' INT TERM
                 "$SCI" wait "$job"; rc=$?
                 trap - INT TERM
-                # Retrieve fresh E2E lcov from the CI host before running the ratchet.
+                # Retrieve fresh E2E lcov from the CI host before the ratchet.
                 E2E_LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
                 if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
                   worktree=$("$SCI" path "$job" 2>/dev/null)
@@ -209,9 +202,9 @@ pre-commit:
                 npm run test:e2e
               fi
 
-# Linear-history guard (from lefthook-common.yml). Authoritative enforcement is
-# server-side (GitHub Ruleset "require linear history"); this is fast local
-# feedback. Kept here so a tiered repo needs only this one file.
+# Linear-history guard. Authoritative enforcement is server-side (GitHub
+# Ruleset "require linear history"); this is fast local feedback. Kept here so
+# a tiered repo needs only this one file.
 pre-merge-commit:
   commands:
     no-merge-on-protected:
