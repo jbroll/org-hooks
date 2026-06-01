@@ -108,7 +108,10 @@ function main() {
 }
 
 // Run main() only when executed directly (not when imported by tests).
-import { fileURLToPath } from "node:url";
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Match by basename, not full-path equality: $ORG_HOOKS is a symlink (/home →
+// /data) on the CI host, and Node realpaths import.meta.url but not argv[1], so
+// a `=== fileURLToPath(import.meta.url)` compare is FALSE under the symlink and
+// silently skips main(). endsWith on the script name is symlink-robust.
+if (process.argv[1] && path.resolve(process.argv[1]).endsWith("build-e2e-map.mjs")) {
   main();
 }
