@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { mergeIntoMap, pruneUbiquitous } from "./e2e-impact-lib.mjs";
+import { mergeIntoMap, pruneUbiquitous, summarizeAreas } from "./e2e-impact-lib.mjs";
 
 /** Consumer worktree root — the job cd's here and exports WORKTREE. */
 const WORKTREE = process.env.WORKTREE ?? process.cwd();
@@ -109,7 +109,15 @@ function main() {
   writeMapAtomic(map, outPath);
   const distinct = new Set(Object.values(map).flat()).size;
   console.log(`build-e2e-map: ${specCount} specs, ${distinct} discriminating src files → ${outPath}`);
-  console.log(`build-e2e-map: pruned ${pruned.length} ubiquitous file(s) (DF >= ${threshold}; zero selection signal)`);
+
+  // Emit the pruned (zero-signal) set as a "lazy-load candidates" report next to
+  // the map, grouped by area, so the audit loop is automated: areas with many
+  // universal files are eager-import candidates to move off the boot path.
+  const areas = summarizeAreas(pruned);
+  const reportPath = outPath.replace(/\.json$/, "") + "-universal.json";
+  writeMapAtomic({ count: pruned.length, byArea: Object.fromEntries(areas), files: pruned }, reportPath);
+  console.log(`build-e2e-map: pruned ${pruned.length} ubiquitous file(s) (DF >= ${threshold}) → ${reportPath}`);
+  for (const [area, c] of areas.slice(0, 8)) console.log(`  ${String(c).padStart(4)}  ${area}`);
 }
 
 // Run main() only when executed directly (not when imported by tests).

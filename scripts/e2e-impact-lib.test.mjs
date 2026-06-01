@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { coveredSrcFiles, mergeIntoMap, pruneUbiquitous } from "./e2e-impact-lib.mjs";
+import { coveredSrcFiles, mergeIntoMap, pruneUbiquitous, summarizeAreas } from "./e2e-impact-lib.mjs";
 
 /** Build a map of `n` specs: every spec covers `core`, plus its own `extra[i]`. */
 function mkMap(n, core, extra = {}) {
@@ -74,5 +74,19 @@ describe("pruneUbiquitous", () => {
 
   it("empty map → no-op", () => {
     assert.deepEqual(pruneUbiquitous({}), { map: {}, pruned: [], specCount: 0 });
+  });
+});
+
+describe("summarizeAreas", () => {
+  it("counts files by src/<a>/<b> area, descending", () => {
+    const areas = summarizeAreas([
+      "src/plugins/core/A.ts",
+      "src/plugins/core/B.ts",
+      "src/views/UserHome/X.tsx",
+    ]);
+    assert.deepEqual(areas, [
+      ["src/plugins/core", 2],
+      ["src/views/UserHome", 1],
+    ]);
   });
 });

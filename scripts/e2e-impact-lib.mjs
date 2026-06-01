@@ -73,3 +73,21 @@ export function pruneUbiquitous(map, threshold = 1.0, minSpecs = 8) {
   }
   return { map: out, pruned: [...drop].sort(), specCount: n };
 }
+
+/**
+ * Count files by their `src/<a>/<b>` area prefix, descending. Used to summarize
+ * the pruned (universal) set into a "lazy-load candidates" report — feature-ish
+ * areas with many universal files are eager-import candidates to move off the
+ * boot path.
+ *
+ * @param {string[]} files
+ * @returns {Array<[string, number]>}  [area, count] sorted by count desc
+ */
+export function summarizeAreas(files) {
+  const counts = {};
+  for (const f of files) {
+    const area = f.split("/").slice(0, 3).join("/");
+    counts[area] = (counts[area] ?? 0) + 1;
+  }
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+}
