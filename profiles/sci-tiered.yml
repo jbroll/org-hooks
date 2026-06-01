@@ -68,9 +68,13 @@ pre-commit:
           - name: eof-whitespace
             run: '"${ORG_HOOKS}/scripts/hygiene.sh" eof-ws {staged_files}'
           # TypeScript static analysis
+          # Auto-fix + re-stage (matches profiles/ts.yml v0.7.4): formatting
+          # self-heals at commit instead of failing the gate. A reformatted file
+          # is re-staged via stage_fixed; only --unsafe-needing fixes still fail.
           - name: ts-format-lint
             glob: "*.{ts,tsx,js,jsx,mjs,cjs,json}"
-            run: npx --no-install biome check --staged --no-errors-on-unmatched
+            run: npx --no-install biome check --write --no-errors-on-unmatched {staged_files}
+            stage_fixed: true
           - name: ts-typecheck
             glob: "*.{ts,tsx,json}"
             run: npm run type-check
@@ -166,7 +170,7 @@ pre-commit:
               SCI=${SCI_BIN:-/home/john/src/simple-ci/sci}
               WT=${SCI_WT:-$(basename "$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)")}
               if test -x "$SCI"; then
-                job=$("$SCI" push "${WT}/ci/e2e-smoke") || exit 1
+                job=$("$SCI" push "${WT}/ci/e2e") || exit 1
                 echo "  e2e  queued ($job)"
                 trap '"$SCI" kill "$job" >/dev/null 2>&1 || true' INT TERM
                 "$SCI" wait "$job"; rc=$?
