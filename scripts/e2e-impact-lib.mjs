@@ -33,3 +33,43 @@ export function mergeIntoMap(map, specId, files) {
   map[specId] = [...new Set(files)].sort();
   return map;
 }
+
+/**
+ * Drop src files whose spec-frequency (fraction of specs covering them) is at or
+ * above `threshold`. A file covered by EVERY spec can never narrow selection
+ * (intersecting it always returns all specs), so it is pure noise — the IDF
+ * "stopword" of test-impact analysis. Removing it lets the files that DO vary
+ * across specs drive selection. Statistical, not a hand-maintained blacklist:
+ * re-derived from the map each build.
+ *
+ * Only meaningful on a full build (all specs present); skipped when there are
+ * too few specs to be statistically meaningful (a file in "all" of 1–2 specs is
+ * not ubiquitous). Spec keys are preserved (kept-file lists may become empty;
+ * the selector simply never intersects an empty list).
+ *
+ * @param {Record<string, string[]>} map  spec → files
+ * @param {number} [threshold=1.0]  prune files with DF >= this (1.0 = all specs)
+ * @param {number} [minSpecs=8]     skip pruning below this many specs
+ * @returns {{ map: Record<string, string[]>, pruned: string[], specCount: number }}
+ */
+export function pruneUbiquitous(map, threshold = 1.0, minSpecs = 8) {
+  const specs = Object.keys(map);
+  const n = specs.length;
+  if (n < minSpecs) return { map, pruned: [], specCount: n };
+
+  const df = {};
+  for (const files of Object.values(map)) {
+    for (const f of files) df[f] = (df[f] ?? 0) + 1;
+  }
+  const drop = new Set(
+    Object.entries(df)
+      .filter(([, c]) => c / n >= threshold)
+      .map(([f]) => f),
+  );
+
+  const out = {};
+  for (const [spec, files] of Object.entries(map)) {
+    out[spec] = files.filter((f) => !drop.has(f));
+  }
+  return { map: out, pruned: [...drop].sort(), specCount: n };
+}

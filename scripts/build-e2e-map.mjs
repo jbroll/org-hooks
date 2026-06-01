@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { mergeIntoMap } from "./e2e-impact-lib.mjs";
+import { mergeIntoMap, pruneUbiquitous } from "./e2e-impact-lib.mjs";
 
 /** Consumer worktree root — the job cd's here and exports WORKTREE. */
 const WORKTREE = process.env.WORKTREE ?? process.cwd();
@@ -99,12 +99,17 @@ export function writeMapAtomic(map, outPath) {
 }
 
 function main() {
-  const map = aggregate(IMPACT_DIR);
+  const raw = aggregate(IMPACT_DIR);
+  // Statistically prune files covered by ~all specs — they carry no selection
+  // signal (see pruneUbiquitous). MAP_PRUNE_DF tunes the cutoff; set it > 1 to
+  // disable. Default 1.0 = drop only files in literally every spec.
+  const threshold = Number(process.env.MAP_PRUNE_DF ?? 1.0);
+  const { map, pruned, specCount } = pruneUbiquitous(raw, threshold);
   const outPath = mapPath();
   writeMapAtomic(map, outPath);
-  const specs = Object.keys(map).length;
   const distinct = new Set(Object.values(map).flat()).size;
-  console.log(`build-e2e-map: ${specs} specs, ${distinct} distinct src files → ${outPath}`);
+  console.log(`build-e2e-map: ${specCount} specs, ${distinct} discriminating src files → ${outPath}`);
+  console.log(`build-e2e-map: pruned ${pruned.length} ubiquitous file(s) (DF >= ${threshold}; zero selection signal)`);
 }
 
 // Run main() only when executed directly (not when imported by tests).
