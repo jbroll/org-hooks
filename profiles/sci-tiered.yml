@@ -110,13 +110,16 @@ pre-commit:
         parallel: true
         jobs:
           # Single union-coverage orchestrator. Pushes BOTH GPU jobs (they run
-          # in parallel on the GPU), waits for both, scps both lcovs back,
-          # merges them per-line (covered = unit OR e2e), then runs ONE ratchet
-          # against coverage-union-baseline.json minus coverage-union-ratchet-exclude.
-          # Wall-clock stays ~max(unit, e2e). Test failure in either job fails the
-          # commit independently of the ratchet. The glob is the union of the old
-          # unit + e2e globs. lefthook globs are static config (they can't read
-          # env), so a repo needing different scoping changes them here.
+          # in parallel on the GPU) and waits FAIL-FAST: the instant either job
+          # fails it kills the sibling and fails the commit, so the developer
+          # gets the failure as soon as the first job fails rather than after the
+          # slowest finishes. Only when BOTH pass does it scp both lcovs, merge
+          # them per-line (covered = unit OR e2e), and run ONE ratchet against
+          # coverage-union-baseline.json minus coverage-union-ratchet-exclude.
+          # Wall-clock for a green commit stays ~max(unit, e2e); for a red one it
+          # is ~min(time-to-first-failure). The glob is the union of the old unit
+          # + e2e globs. lefthook globs are static config (they can't read env),
+          # so a repo needing different scoping changes them here.
           - name: coverage-union
             glob: "{src,packages,backend,scripts,ci}/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}"
             run: |
@@ -129,9 +132,37 @@ pre-commit:
                 job_e=$("$SCI" push "${WT}/ci/e2e") || exit 1
                 echo "  e2e  queued ($job_e)"
                 trap '"$SCI" kill "$job_u" >/dev/null 2>&1; "$SCI" kill "$job_e" >/dev/null 2>&1; true' INT TERM
-                "$SCI" wait "$job_u"; rc_u=$?
-                "$SCI" wait "$job_e"; rc_e=$?
+                # Fail-fast wait: background a waiter per job recording its exit
+                # code; the instant EITHER fails, kill the sibling and exit — no
+                # point waiting out the slower job or computing union coverage
+                # when a suite already failed. Only when BOTH pass do we merge +
+                # ratchet. This gives the developer the failure as soon as the
+                # FIRST job fails, not after the slowest one finishes.
+                st=$(mktemp -d)
+                ( "$SCI" wait "$job_u" >"$st/u.log" 2>&1; echo $? >"$st/u.rc" ) &
+                ( "$SCI" wait "$job_e" >"$st/e.log" 2>&1; echo $? >"$st/e.rc" ) &
+                rc_u=""; rc_e=""
+                while : ; do
+                  [ -z "$rc_u" ] && [ -f "$st/u.rc" ] && rc_u=$(cat "$st/u.rc")
+                  [ -z "$rc_e" ] && [ -f "$st/e.rc" ] && rc_e=$(cat "$st/e.rc")
+                  if [ -n "$rc_u" ] && [ "$rc_u" -ne 0 ]; then
+                    "$SCI" kill "$job_e" >/dev/null 2>&1 || true
+                    trap - INT TERM; cat "$st/u.log"
+                    echo "  unit FAILED ($rc_u) — failing fast, killed e2e ($job_e)"
+                    rm -rf "$st"; exit "$rc_u"
+                  fi
+                  if [ -n "$rc_e" ] && [ "$rc_e" -ne 0 ]; then
+                    "$SCI" kill "$job_u" >/dev/null 2>&1 || true
+                    trap - INT TERM; cat "$st/e.log"
+                    echo "  e2e FAILED ($rc_e) — failing fast, killed unit ($job_u)"
+                    rm -rf "$st"; exit "$rc_e"
+                  fi
+                  [ -n "$rc_u" ] && [ -n "$rc_e" ] && break
+                  sleep 3
+                done
                 trap - INT TERM
+                cat "$st/u.log" "$st/e.log"; rm -rf "$st"
+                # Both suites passed — retrieve lcovs, merge, and ratchet.
 
                 LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
                 E2E_LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
@@ -144,7 +175,7 @@ pre-commit:
 
                 UNION_LCOV=${COVERAGE_UNION_LCOV:-coverage/union/lcov.info}
                 UNION_BASELINE=${COVERAGE_UNION_BASELINE:-coverage-union-baseline.json}
-                if [ -n "${ORG_HOOKS:-}" ] && [ -f "$LCOV" -o -f "$E2E_LCOV" ]; then
+                if [ -n "${ORG_HOOKS:-}" ] && { [ -f "$LCOV" ] || [ -f "$E2E_LCOV" ]; }; then
                   node "${ORG_HOOKS}/scripts/coverage-union-merge.mjs" \
                     --unit "$LCOV" --e2e "$E2E_LCOV" --out "$UNION_LCOV" --src-root src || exit 1
                 fi
@@ -163,8 +194,7 @@ pre-commit:
                       --lcov "$UNION_LCOV" --baseline "$UNION_BASELINE" $staged || exit 1
                   fi
                 fi
-                [ "$rc_u" -ne 0 ] && exit "$rc_u"
-                exit "$rc_e"
+                exit 0
               else
                 npm run test:coverage && npm run test:e2e
               fi
