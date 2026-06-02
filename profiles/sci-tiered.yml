@@ -28,9 +28,11 @@
 #     1. tier1-static — group(parallel: true): 12 fast local checks. All run
 #        even if one fails (so you see every problem), but the GROUP's exit is
 #        nonzero if any failed, which breaks the pipe.
-#     2. tier2-gpu    — group(parallel: true): unit-tests + e2e-tests sci
-#        dispatch. Runs ONLY if tier1-static fully passed. A 0.02s lint/type
-#        failure therefore never dispatches (or waits on) a ~2-min GPU job.
+#     2. tier2-gpu    — group(parallel: true): a single coverage-union job that
+#        sci-dispatches BOTH the unit and e2e GPU runs in parallel, then merges
+#        their lcovs per-line and runs ONE union ratchet. Runs ONLY if
+#        tier1-static fully passed. A 0.02s lint/type failure therefore never
+#        dispatches (or waits on) a ~2-min GPU job.
 #
 # ── ENV KNOBS (export from the consumer's rc: file; all optional) ─────────────
 #   ORG_HOOKS        REQUIRED — absolute path to this org-hooks checkout.
@@ -107,103 +109,64 @@ pre-commit:
       group:
         parallel: true
         jobs:
-          # Globs are baked in here as sensible defaults so the consumer needs
-          # NO override. unit-tests fires for any source/test change that could
-          # move coverage; e2e-tests is narrowed to frontend source ({src,
-          # packages,ci}) so backend/scripts-only commits skip the browser
-          # suite. lefthook globs are static config (they can't read env), so a
-          # repo needing different scoping changes them here, not via a config
-          # override that would re-break the merge invariants above.
-          - name: unit-tests
+          # Single union-coverage orchestrator. Pushes BOTH GPU jobs (they run
+          # in parallel on the GPU), waits for both, scps both lcovs back,
+          # merges them per-line (covered = unit OR e2e), then runs ONE ratchet
+          # against coverage-union-baseline.json minus coverage-union-ratchet-exclude.
+          # Wall-clock stays ~max(unit, e2e). Test failure in either job fails the
+          # commit independently of the ratchet. The glob is the union of the old
+          # unit + e2e globs. lefthook globs are static config (they can't read
+          # env), so a repo needing different scoping changes them here.
+          - name: coverage-union
             glob: "{src,packages,backend,scripts,ci}/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}"
             run: |
               SCI=${SCI_BIN:-/home/john/src/simple-ci/sci}
-              # CI queue name = the repo's own dir, derived from the git COMMON
-              # dir so EVERY worktree (and the main checkout) resolves to the
-              # same queue. No SCI_WT override needed. --git-common-dir is the
-              # shared .git (absolute here); its parent dir's basename is the repo.
               WT=${SCI_WT:-$(basename "$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)")}
               if test -x "$SCI"; then
-                # Let the repo prepare per-commit inputs (e.g. a changed-files
-                # manifest to scope the test run) before the job is rsynced.
                 [ -x ci/before-test-push ] && ci/before-test-push
-                job=$("$SCI" push "${WT}/ci/test") || exit 1
-                echo "  unit queued ($job)"
-                # If the commit is interrupted, kill the remote job immediately.
-                trap '"$SCI" kill "$job" >/dev/null 2>&1 || true' INT TERM
-                "$SCI" wait "$job"; rc=$?
+                job_u=$("$SCI" push "${WT}/ci/test") || exit 1
+                echo "  unit queued ($job_u)"
+                job_e=$("$SCI" push "${WT}/ci/e2e") || exit 1
+                echo "  e2e  queued ($job_e)"
+                trap '"$SCI" kill "$job_u" >/dev/null 2>&1; "$SCI" kill "$job_e" >/dev/null 2>&1; true' INT TERM
+                "$SCI" wait "$job_u"; rc_u=$?
+                "$SCI" wait "$job_e"; rc_e=$?
                 trap - INT TERM
-                # Retrieve fresh lcov from the CI host before the ratchet so it
-                # always checks coverage from THIS commit.
+
                 LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
+                E2E_LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
                 if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
-                  worktree=$("$SCI" path "$job" 2>/dev/null)
-                  if [ -n "$worktree" ]; then
-                    mkdir -p "$(dirname "$LCOV")"
-                    scp -q "$ci_host:$worktree/$LCOV" "$LCOV" 2>/dev/null || true
-                  fi
+                  wt_u=$("$SCI" path "$job_u" 2>/dev/null)
+                  wt_e=$("$SCI" path "$job_e" 2>/dev/null)
+                  [ -n "$wt_u" ] && { mkdir -p "$(dirname "$LCOV")"; scp -q "$ci_host:$wt_u/$LCOV" "$LCOV" 2>/dev/null || true; }
+                  [ -n "$wt_e" ] && { mkdir -p "$(dirname "$E2E_LCOV")"; scp -q "$ci_host:$wt_e/$E2E_LCOV" "$E2E_LCOV" 2>/dev/null || true; }
                 fi
-                # Run coverage ratchet inline against the just-retrieved lcov.
-                BASELINE=${COVERAGE_BASELINE:-coverage-baseline.json}
-                if [ -f "$BASELINE" ] && [ -f "$LCOV" ] && [ -n "${ORG_HOOKS:-}" ]; then
+
+                UNION_LCOV=${COVERAGE_UNION_LCOV:-coverage/union/lcov.info}
+                UNION_BASELINE=${COVERAGE_UNION_BASELINE:-coverage-union-baseline.json}
+                if [ -n "${ORG_HOOKS:-}" ] && [ -f "$LCOV" -o -f "$E2E_LCOV" ]; then
+                  node "${ORG_HOOKS}/scripts/coverage-union-merge.mjs" \
+                    --unit "$LCOV" --e2e "$E2E_LCOV" --out "$UNION_LCOV" --src-root src || exit 1
+                fi
+                if [ -f "$UNION_BASELINE" ] && [ -f "$UNION_LCOV" ] && [ -n "${ORG_HOOKS:-}" ]; then
                   staged=$(git diff --cached --name-only --diff-filter=ACMR \
                     | grep -E '^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$' \
                     | grep -Ev '(^src/test/|\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$)')
-                  if [ -f "coverage-ratchet-exclude" ]; then
+                  if [ -f "coverage-union-ratchet-exclude" ]; then
                     _excl=$(mktemp)
-                    grep -v '^#' coverage-ratchet-exclude | grep -v '^[[:space:]]*$' > "$_excl"
+                    grep -v '^#' coverage-union-ratchet-exclude | grep -v '^[[:space:]]*$' > "$_excl"
                     staged=$(printf '%s\n' "$staged" | grep -vFf "$_excl")
                     rm -f "$_excl"
                   fi
                   if [ -n "$staged" ]; then
                     node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
-                      --lcov "$LCOV" --baseline "$BASELINE" $staged || exit 1
+                      --lcov "$UNION_LCOV" --baseline "$UNION_BASELINE" $staged || exit 1
                   fi
                 fi
-                exit $rc
+                [ "$rc_u" -ne 0 ] && exit "$rc_u"
+                exit "$rc_e"
               else
-                npm run test:coverage
-              fi
-          - name: e2e-tests
-            glob: "{src,packages,ci}/**/*.{ts,tsx,mjs,cjs,css}"
-            run: |
-              SCI=${SCI_BIN:-/home/john/src/simple-ci/sci}
-              WT=${SCI_WT:-$(basename "$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)")}
-              if test -x "$SCI"; then
-                job=$("$SCI" push "${WT}/ci/e2e") || exit 1
-                echo "  e2e  queued ($job)"
-                trap '"$SCI" kill "$job" >/dev/null 2>&1 || true' INT TERM
-                "$SCI" wait "$job"; rc=$?
-                trap - INT TERM
-                # Retrieve fresh E2E lcov from the CI host before the ratchet.
-                E2E_LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
-                if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
-                  worktree=$("$SCI" path "$job" 2>/dev/null)
-                  if [ -n "$worktree" ]; then
-                    mkdir -p "$(dirname "$E2E_LCOV")"
-                    scp -q "$ci_host:$worktree/$E2E_LCOV" "$E2E_LCOV" 2>/dev/null || true
-                  fi
-                fi
-                # Run E2E coverage ratchet inline against the just-retrieved lcov.
-                E2E_BASELINE=${COVERAGE_E2E_BASELINE:-coverage-e2e-baseline.json}
-                if [ -f "$E2E_BASELINE" ] && [ -f "$E2E_LCOV" ] && [ -n "${ORG_HOOKS:-}" ]; then
-                  staged=$(git diff --cached --name-only --diff-filter=ACMR \
-                    | grep -E '^src/.*\.(ts|tsx)$' \
-                    | grep -Ev '(^src/test/|\.(test|spec)\.(ts|tsx)$)')
-                  if [ -f "coverage-e2e-ratchet-exclude" ]; then
-                    _excl=$(mktemp)
-                    grep -v '^#' coverage-e2e-ratchet-exclude | grep -v '^[[:space:]]*$' > "$_excl"
-                    staged=$(printf '%s\n' "$staged" | grep -vFf "$_excl")
-                    rm -f "$_excl"
-                  fi
-                  if [ -n "$staged" ]; then
-                    node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
-                      --lcov "$E2E_LCOV" --baseline "$E2E_BASELINE" $staged || exit 1
-                  fi
-                fi
-                exit $rc
-              else
-                npm run test:e2e
+                npm run test:coverage && npm run test:e2e
               fi
 
 # Linear-history guard. Authoritative enforcement is server-side (GitHub
