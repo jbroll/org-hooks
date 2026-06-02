@@ -67,3 +67,42 @@ test("formatLcov recomputes LF/LH from unioned DA and emits canonical SF", () =>
   assert.match(block, /LF:5/);
   assert.match(block, /LH:5/);
 });
+
+test("CLI merges two lcov files into a union lcov on disk", () => {
+  const dir = mkdtempSync(join(tmpdir(), "union-"));
+  try {
+    const unit = join(dir, "unit.info");
+    const e2e = join(dir, "e2e.info");
+    const out = join(dir, "union.info");
+    writeFileSync(unit, UNIT);
+    writeFileSync(e2e, E2E);
+    execFileSync("node", [
+      join(__dirname, "coverage-union-merge.mjs"),
+      "--unit", unit, "--e2e", e2e, "--out", out, "--src-root", "src",
+    ]);
+    const text = readFileSync(out, "utf8");
+    assert.match(text, /SF:src\/App\.tsx/);
+    assert.doesNotMatch(text, /localhost-5441/);
+    const appBlock = text.split("end_of_record").find((b) => b.includes("src/App.tsx"));
+    assert.match(appBlock, /LH:5/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI tolerates a missing e2e lcov (treats as empty)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "union-"));
+  try {
+    const unit = join(dir, "unit.info");
+    const out = join(dir, "union.info");
+    writeFileSync(unit, UNIT);
+    execFileSync("node", [
+      join(__dirname, "coverage-union-merge.mjs"),
+      "--unit", unit, "--e2e", join(dir, "nope.info"), "--out", out, "--src-root", "src",
+    ]);
+    const text = readFileSync(out, "utf8");
+    assert.match(text, /SF:src\/App\.tsx/); // unit-only union still produced
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
