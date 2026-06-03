@@ -15,14 +15,24 @@ import path from "node:path";
  * @param {string} [cwd]
  */
 export function normalisePath(p, srcRoot, cwd = process.cwd()) {
+  // Workspace packages carry their own `<pkg>/src` root. Anchor on `packages/`
+  // BEFORE the srcRoot marker so a package file keeps its
+  // `packages/<pkg>/src/...` identity instead of collapsing into the top-level
+  // src/ namespace (which loses identity and can collide with src/ files).
   if (path.isAbsolute(p)) {
     const cwdSep = cwd + path.sep;
     if (p.startsWith(cwdSep)) return p.slice(cwdSep.length);
+    const pkgMarker = `${path.sep}packages${path.sep}`;
+    const pkgIdx = p.indexOf(pkgMarker);
+    if (pkgIdx !== -1) return p.slice(pkgIdx + 1);
     const marker = `${path.sep}${srcRoot}${path.sep}`;
     const idx = p.indexOf(marker);
     if (idx !== -1) return p.slice(idx + 1);
     return p;
   }
+  if (p.startsWith("packages/")) return p;
+  const pkgIdx = p.indexOf("/packages/");
+  if (pkgIdx !== -1) return p.slice(pkgIdx + 1);
   const marker = `/${srcRoot}/`;
   const idx = p.indexOf(marker);
   if (idx !== -1) return p.slice(idx + 1);

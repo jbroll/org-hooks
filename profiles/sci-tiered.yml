@@ -194,8 +194,8 @@ pre-commit:
                 fi
                 if [ -f "$UNION_BASELINE" ] && [ -f "$UNION_LCOV" ] && [ -n "${ORG_HOOKS:-}" ]; then
                   staged=$(git diff --cached --name-only --diff-filter=ACMR \
-                    | grep -E '^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$' \
-                    | grep -Ev '(^src/test/|\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$)')
+                    | grep -E '^(src|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs)$' \
+                    | grep -Ev '(^src/test/|/__tests__/|\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$)')
                   if [ -f "coverage-union-ratchet-exclude" ]; then
                     _excl=$(mktemp)
                     grep -v '^#' coverage-union-ratchet-exclude | grep -v '^[[:space:]]*$' > "$_excl"

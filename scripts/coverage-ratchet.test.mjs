@@ -43,6 +43,32 @@ test("normalisePath: absolute path outside CWD found via src marker", () => {
   assert.equal(normalisePath("/other/proj/src/foo.ts", "src", cwd), "src/foo.ts");
 });
 
+// Workspace packages have their own `<pkg>/src` root. They must keep their
+// `packages/<pkg>/src/...` identity instead of collapsing into the top-level
+// src/ namespace (which would lose identity and collide with src/ files).
+test("normalisePath: relative packages path is preserved", () => {
+  assert.equal(
+    normalisePath("packages/quick-contact/src/hooks/useQCContact.ts", "src"),
+    "packages/quick-contact/src/hooks/useQCContact.ts",
+  );
+});
+
+test("normalisePath: absolute packages path outside CWD keeps the packages prefix", () => {
+  const cwd = "/home/user/proj";
+  assert.equal(
+    normalisePath("/other/proj/packages/qc/src/foo.ts", "src", cwd),
+    "packages/qc/src/foo.ts",
+  );
+});
+
+test("normalisePath: absolute packages path under CWD is relative and preserved", () => {
+  const cwd = "/home/user/proj";
+  assert.equal(
+    normalisePath("/home/user/proj/packages/qc/src/foo.ts", "src", cwd),
+    "packages/qc/src/foo.ts",
+  );
+});
+
 // ───────────────────────────── parseLcov ────────────────────────────────────
 
 test("parseLcov: extracts LF/LH per file", () => {
