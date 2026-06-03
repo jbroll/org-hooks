@@ -41,9 +41,25 @@ describe("selectSpecs", () => {
     assert.deepEqual(r.specs, ["tests/smoke.spec.ts"]); // only smoke
   });
 
-  it("unknown unmapped frontend file -> runAll (fail-safe)", () => {
+  it("unmapped frontend file falls back to the smoke floor (not runAll)", () => {
+    // An unmapped file's impact is unknown; the @smoke floor is its proxy (the
+    // nightly map rebuild refreshes coverage). It must NOT discard other specs.
     const r = selectSpecs({ changed: ["src/components/NewThing.tsx"], map, smoke });
-    assert.equal(r.runAll, true);
+    assert.equal(r.runAll, false);
+    assert.deepEqual(r.specs, ["tests/smoke.spec.ts"]);
+  });
+
+  it("an unmapped changed file does not discard a mapped file's specs", () => {
+    // Regression: a single unmapped file used to early-return runAll and throw
+    // away the mapped files' specs, so a route shell (MapView) lost its covering
+    // specs and the union ratchet reported a false coverage regression.
+    const r = selectSpecs({
+      changed: ["src/components/MapView/MapView.tsx", "src/components/NewThing.tsx"],
+      map,
+      smoke,
+    });
+    assert.equal(r.runAll, false);
+    assert.deepEqual(r.specs.sort(), ["tests/map.spec.ts", "tests/smoke.spec.ts"]);
   });
 
   it("changed spec file is run directly", () => {
