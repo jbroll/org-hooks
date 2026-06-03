@@ -164,6 +164,30 @@ test("checkOne: baseline + missing lcov → fail", () => {
   assert.match(r.reason, /regressed to 0/);
 });
 
+const WAIVER_OPTS = { floor: 0.75, tolerance: 0.005, regressionWaiver: 0.9 };
+
+test("checkOne: regression allowed when cur stays at/above the waiver", () => {
+  // baseline 100%, current 95% — a real regression, but ≥ 90% waiver → pass
+  assert.equal(checkOne("src/a.ts", 1.0, { linesFound: 100, linesHit: 95 }, WAIVER_OPTS), null);
+});
+
+test("checkOne: regression below the waiver still fails", () => {
+  // baseline 95%, current 88% — below the 90% waiver → ratchet bites
+  const r = checkOne("src/a.ts", 0.95, { linesFound: 100, linesHit: 88 }, WAIVER_OPTS);
+  assert.match(r.reason, /coverage dropped/);
+});
+
+test("checkOne: waiver does not rescue a file absent from lcov", () => {
+  const r = checkOne("src/a.ts", 1.0, undefined, WAIVER_OPTS);
+  assert.match(r.reason, /regressed to 0/);
+});
+
+test("checkOne: default opts (no waiver) preserve strict no-regression", () => {
+  // regressionWaiver defaults to 1 (off) → a 100%→95% drop still fails
+  const r = checkOne("src/a.ts", 1.0, { linesFound: 100, linesHit: 95 }, OPTS);
+  assert.match(r.reason, /coverage dropped/);
+});
+
 // ───────────────────────────── ratchetUp ────────────────────────────────────
 
 test("ratchetUp: improves baseline, leaves untouched files alone", () => {
@@ -266,6 +290,19 @@ test("CLI: fails when staged file regresses below tolerance", () => {
     ]);
     assert.equal(r.code, 1);
     assert.match(r.stderr, /coverage dropped/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: default 0.90 waiver lets a well-covered file regress", () => {
+  const dir = mkSandbox();
+  try {
+    const baseline = join(dir, "b.json");
+    writeFileSync(baseline, formatBaseline({ "src/a.ts": 1.0 }));
+    const lcov = writeLcov(dir, { "src/a.ts": { lf: 100, lh: 95 } }); // 95% ≥ 0.90
+    const r = runRatchet(dir, ["--lcov", lcov, "--baseline", baseline, "src/a.ts"]);
+    assert.equal(r.code, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

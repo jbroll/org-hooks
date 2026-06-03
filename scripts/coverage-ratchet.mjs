@@ -10,7 +10,9 @@
 // Per-file rules:
 //   1. File not in baseline: must reach >= FLOOR (covers both brand-new files
 //      and ones never previously measured).
-//   2. File in baseline: current % must be >= baseline % within TOLERANCE pp.
+//   2. File in baseline: current % must be >= baseline % within TOLERANCE pp,
+//      UNLESS it is still >= REGRESSION-WAIVER — a well-covered file may regress
+//      freely (one new error-path line shouldn't fail the build).
 //
 // Bootstrap: when the baseline file does not exist on disk, the first run
 // auto-seeds from the current lcov (exit 0). Subsequent commits then have
@@ -28,6 +30,8 @@
 //                     (default: $COVERAGE_FLOOR or 0.75)
 //   --tolerance N     0–1 slack vs baseline % to absorb coverage-instrument noise
 //                     (default: $COVERAGE_TOLERANCE or 0.005 = 0.5 pp)
+//   --regression-waiver N  0–1; a baselined file at/above this ratio may regress
+//                     freely (default: $COVERAGE_REGRESSION_WAIVER or 0.90)
 //   --src-root DIR    strip path prefix up to this dir name when normalising lcov
 //                     SF: paths (default: src)
 //   --seed            write current lcov to baseline unconditionally; no gate check.
@@ -56,6 +60,7 @@ let lcovPath = process.env.COVERAGE_LCOV ?? "coverage/lcov.info";
 let baselinePath = process.env.COVERAGE_BASELINE ?? "coverage-baseline.json";
 let floor = Number(process.env.COVERAGE_FLOOR ?? "0.75");
 let tolerance = Number(process.env.COVERAGE_TOLERANCE ?? "0.005");
+let regressionWaiver = Number(process.env.COVERAGE_REGRESSION_WAIVER ?? "0.90");
 let srcRoot = "src";
 let seedMode = false;
 /** @type {string[]} */
@@ -67,6 +72,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (arg === "--baseline") baselinePath = process.argv[++i];
   else if (arg === "--floor") floor = Number(process.argv[++i]);
   else if (arg === "--tolerance") tolerance = Number(process.argv[++i]);
+  else if (arg === "--regression-waiver") regressionWaiver = Number(process.argv[++i]);
   else if (arg === "--src-root") srcRoot = process.argv[++i];
   else if (arg === "--seed") seedMode = true;
   else if (!arg.startsWith("--")) stagedFiles.push(arg);
@@ -146,7 +152,7 @@ if (seedMode || !baselineExists) {
 /** @type {{ file: string; reason: string }[]} */
 const failures = [];
 for (const file of stagedFiles) {
-  const fail = checkOne(file, baseline[file], lcov[file], { floor, tolerance });
+  const fail = checkOne(file, baseline[file], lcov[file], { floor, tolerance, regressionWaiver });
   if (fail) failures.push(fail);
 }
 

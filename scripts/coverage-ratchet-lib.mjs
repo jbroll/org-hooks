@@ -107,10 +107,16 @@ export function formatBaseline(files) {
  * @param {string} file
  * @param {number|undefined} prevPct  Baseline ratio 0-1, or undefined if not in baseline.
  * @param {FileMetric|undefined} cur  Current lcov entry.
- * @param {{ floor: number; tolerance: number }} opts
+ * @param {{ floor: number; tolerance: number; regressionWaiver?: number }} opts
+ *   floor             — minimum for a file with no baseline entry (new files).
+ *   tolerance         — slack vs baseline % to absorb instrumentation noise.
+ *   regressionWaiver  — a baselined file at/above this ratio may regress freely
+ *                       (a well-covered file shouldn't fail the build over one
+ *                       new error-path line; that just pushes toward excludes).
+ *                       Default 1 (off — no waiver) preserves strict behavior.
  * @returns {{ file: string; reason: string }|null}
  */
-export function checkOne(file, prevPct, cur, { floor, tolerance }) {
+export function checkOne(file, prevPct, cur, { floor, tolerance, regressionWaiver = 1 }) {
   if (prevPct === undefined) {
     if (!cur)
       return { file, reason: "file not exercised by tests (no entry in lcov)" };
@@ -123,10 +129,12 @@ export function checkOne(file, prevPct, cur, { floor, tolerance }) {
   }
   if (!cur)
     return { file, reason: "previously measured but absent from current lcov — regressed to 0" };
+  // A baselined file that stays at/above the waiver is allowed to regress.
+  if (pct(cur) >= regressionWaiver) return null;
   if (pct(cur) < prevPct - tolerance)
     return {
       file,
-      reason: `coverage dropped: ${fmtPct(prevPct)} → ${fmtPct(pct(cur))} (tolerance ${(tolerance * 100).toFixed(2)} pp)`,
+      reason: `coverage dropped: ${fmtPct(prevPct)} → ${fmtPct(pct(cur))} (tolerance ${(tolerance * 100).toFixed(2)} pp; waiver ≥ ${fmtPct(regressionWaiver)})`,
     };
   return null;
 }
