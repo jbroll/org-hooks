@@ -87,6 +87,27 @@ case "$cmd" in
       fi
     done
     ;;
+  fully-staged)
+    # Gate soundness: the GPU test job rsyncs the WORKING TREE, but the commit
+    # captures only STAGED files. If they differ, the gate tests something other
+    # than what lands ("green" describes your desk, not the SHA). Require the
+    # working tree to hold nothing beyond what's staged. Gitignored runtime deps
+    # (node_modules, .env.local, coverage/, …) are exempt via --exclude-standard.
+    # MUST run after any auto-fix/restage step (e.g. ts-format-lint stage_fixed)
+    # so a concurrent restage can't race this read — keep it out of that group.
+    if ! git diff --quiet; then
+      echo "  unstaged changes to tracked files — stage them ('git add -A') or stash before committing"
+      echo "    (the gate tests the working tree; it must equal what you commit):"
+      git --no-pager diff --name-only | sed 's/^/      /'
+      fail=1
+    fi
+    untracked=$(git ls-files --others --exclude-standard)
+    if [ -n "$untracked" ]; then
+      echo "  untracked (non-ignored) files present — add or remove them:"
+      printf '%s\n' "$untracked" | sed 's/^/      /'
+      fail=1
+    fi
+    ;;
   no-merge-commit)
     # Blocks `git merge` that would create a merge commit on a protected
     # branch. Fast feedback only — GitHub Rulesets are authoritative.

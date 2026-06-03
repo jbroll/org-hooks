@@ -59,6 +59,13 @@ pre-commit:
   # This is the ONLY mechanism that gates tier2 behind tier1 (verified 2.1.6).
   piped: true
   jobs:
+    # ── Tier 0 — staged-tree gate. The GPU test job rsyncs the WORKING TREE,
+    #    but the commit captures only STAGED files; refuse anything not staged so
+    #    the gate tests exactly what lands. Sub-ms — runs FIRST (fail-fast) and
+    #    before tier1-instant's ts-format-lint stage_fixed restage, so it can't
+    #    race that re-stage. ───────────────────────────────────────────────────
+    - name: fully-staged
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" fully-staged'
     # ── Tier 1a — INSTANT, local, parallel. Sub-second checks; all must pass
     #    before the slower Tier 1b runs, so a cheap violation (re-export,
     #    conflict marker, dup type, oversized file) fails in <1s instead of
