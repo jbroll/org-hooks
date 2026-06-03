@@ -25,14 +25,18 @@
 #
 # ── STRUCTURE ─────────────────────────────────────────────────────────────────
 #   pre-commit (piped: true)
-#     1. tier1-static — group(parallel: true): 12 fast local checks. All run
-#        even if one fails (so you see every problem), but the GROUP's exit is
-#        nonzero if any failed, which breaks the pipe.
-#     2. tier2-gpu    — group(parallel: true): a single coverage-union job that
+#     1. tier1-instant — group(parallel: true): sub-second local checks (secrets,
+#        hygiene, format-lint, dup-types, no-reexports, size-caps). Runs FIRST so
+#        a cheap violation fails in <1s instead of waiting out typecheck/knip/dpdm.
+#     2. tier1-static  — group(parallel: true): the slow local static analysis
+#        (typecheck, knip, dpdm circular). Runs only if tier1-instant passed.
+#     3. tier2-gpu     — group(parallel: true): a single coverage-union job that
 #        sci-dispatches BOTH the unit and e2e GPU runs in parallel, then merges
-#        their lcovs per-line and runs ONE union ratchet. Runs ONLY if
-#        tier1-static fully passed. A 0.02s lint/type failure therefore never
-#        dispatches (or waits on) a ~2-min GPU job.
+#        their lcovs per-line and runs ONE union ratchet. Runs ONLY if both local
+#        tiers fully passed. A 0.02s lint/type failure therefore never dispatches
+#        (or waits on) a ~2-min GPU job.
+#   Each group runs all its jobs even if one fails (so you see every problem in
+#   that tier), but a nonzero group exit breaks the pipe → later tiers skipped.
 #
 # ── ENV KNOBS (export from the consumer's rc: file; all optional) ─────────────
 #   ORG_HOOKS        REQUIRED — absolute path to this org-hooks checkout.
@@ -55,8 +59,11 @@ pre-commit:
   # This is the ONLY mechanism that gates tier2 behind tier1 (verified 2.1.6).
   piped: true
   jobs:
-    # ── Tier 1 — fast, local, parallel. All must pass before Tier 2. ─────────
-    - name: tier1-static
+    # ── Tier 1a — INSTANT, local, parallel. Sub-second checks; all must pass
+    #    before the slower Tier 1b runs, so a cheap violation (re-export,
+    #    conflict marker, dup type, oversized file) fails in <1s instead of
+    #    waiting out typecheck/knip/dpdm. ──────────────────────────────────────
+    - name: tier1-instant
       group:
         parallel: true
         jobs:
@@ -69,7 +76,6 @@ pre-commit:
             run: '"${ORG_HOOKS}/scripts/hygiene.sh" conflict-markers {staged_files}'
           - name: eof-whitespace
             run: '"${ORG_HOOKS}/scripts/hygiene.sh" eof-ws {staged_files}'
-          # TypeScript static analysis
           # Auto-fix + re-stage (matches profiles/ts.yml v0.7.4): formatting
           # self-heals at commit instead of failing the gate. A reformatted file
           # is re-staged via stage_fixed; only --unsafe-needing fixes still fail.
@@ -77,6 +83,25 @@ pre-commit:
             glob: "*.{ts,tsx,js,jsx,mjs,cjs,json}"
             run: npx --no-install biome check --write --no-errors-on-unmatched {staged_files}
             stage_fixed: true
+          - name: ts-dup-types
+            glob: "*.{ts,tsx}"
+            run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src
+          - name: ts-no-reexports
+            glob: "*.{ts,tsx,js,jsx,mjs}"
+            run: node "${ORG_HOOKS}/scripts/check-no-reexports.mjs" src
+          - name: ts-size-cap
+            glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
+            run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'
+          - name: ts-test-size-cap
+            glob: "*.{test,spec}.{ts,tsx,js,jsx}"
+            run: '"${ORG_HOOKS}/scripts/hygiene.sh" test-size-cap {staged_files}'
+
+    # ── Tier 1b — SLOW static analysis, local, parallel. Runs only if Tier 1a
+    #    passed; gates Tier 2. ─────────────────────────────────────────────────
+    - name: tier1-static
+      group:
+        parallel: true
+        jobs:
           - name: ts-typecheck
             glob: "*.{ts,tsx,json}"
             run: npm run type-check
@@ -91,18 +116,6 @@ pre-commit:
             run: >-
               npx --no-install dpdm --no-warning --no-tree
               --exit-code "${DPDM_CIRCULAR:-circular:1}" "src/**/*.{ts,tsx}"
-          - name: ts-dup-types
-            glob: "*.{ts,tsx}"
-            run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src
-          - name: ts-no-reexports
-            glob: "*.{ts,tsx,js,jsx,mjs}"
-            run: node "${ORG_HOOKS}/scripts/check-no-reexports.mjs" src
-          - name: ts-size-cap
-            glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
-            run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'
-          - name: ts-test-size-cap
-            glob: "*.{test,spec}.{ts,tsx,js,jsx}"
-            run: '"${ORG_HOOKS}/scripts/hygiene.sh" test-size-cap {staged_files}'
 
     # ── Tier 2 — expensive GPU dispatch. Runs ONLY if Tier 1 fully passed. ───
     - name: tier2-gpu
