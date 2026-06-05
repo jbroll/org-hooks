@@ -50,6 +50,13 @@
 #   SCI_BIN          Path to the simple-ci binary (default below). Falls back
 #                    to `npm run test:coverage` / `test:e2e` if not executable.
 #   COVERAGE_* / COVERAGE_E2E_*  ratchet lcov/baseline/floor/tolerance paths.
+#   LEFTHOOK_OUTPUT  lefthook's printed sections. Defaulted to
+#                    "summary,failure,execution_info" by rc.sh (sourced from the
+#                    consumer rc:) so passing commands stay quiet and a failure
+#                    isn't buried. CANNOT be set here — lefthook 2.1.x doesn't
+#                    merge top-level `output` from a remote config; it must come
+#                    from the rc env. A repo overrides by exporting its own
+#                    before `. "$ORG_HOOKS/rc.sh"`.
 #
 # Required npm scripts in the consumer: type-check, knip, and (for the sci
 # fallback path) test:coverage, test:e2e.

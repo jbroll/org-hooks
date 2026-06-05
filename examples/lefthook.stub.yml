@@ -23,6 +23,11 @@
 # Create lefthook-rc.sh alongside lefthook.yml:
 #   #!/bin/sh
 #   export ORG_HOOKS=/path/to/your/org-hooks   # must match git_url above
+#   . "$ORG_HOOKS/rc.sh"                        # org-wide hook env defaults
+#
+# Sourcing rc.sh pulls org defaults (e.g. LEFTHOOK_OUTPUT, which quiets passing
+# commands so a failure isn't buried). Each default uses := — override any by
+# exporting it BEFORE the `. "$ORG_HOOKS/rc.sh"` line.
 #
 # For machines with a different org-hooks path, override rc: in a gitignored
 # lefthook-local.yml pointing to a machine-local rc file.
