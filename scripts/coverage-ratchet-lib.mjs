@@ -166,3 +166,19 @@ export function ratchetUp(prev, lcov) {
   }
   return next;
 }
+
+/**
+ * Compute a full-rebuild baseline that PRESERVES every accumulated high-water
+ * mark. Unlike a hard `--seed` (which discards the old baseline), this merges
+ * the new lcov over the existing baseline taking the max per file, and keeps
+ * baseline entries absent from the new lcov untouched — so a full reseed can
+ * never "forget" or lower a file below its accumulated mark. (Mechanically the
+ * same monotonic max-merge as {@link ratchetUp}; named separately to mark the
+ * deliberate full-reseed intent at the call site.)
+ * @param {Record<string, number>} prev  Existing baseline ratios.
+ * @param {Record<string, FileMetric>} lcov
+ * @returns {Record<string, number>}
+ */
+export function reseedBaseline(prev, lcov) {
+  return ratchetUp(prev, lcov);
+}

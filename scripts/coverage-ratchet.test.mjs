@@ -18,6 +18,7 @@ import {
   parseLcov,
   pct,
   ratchetUp,
+  reseedBaseline,
 } from "./coverage-ratchet-lib.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -233,6 +234,28 @@ test("ratchetUp: lower coverage does not down-grade baseline", () => {
   assert.equal(next["src/a.ts"], 0.8, "stayed at 0.80 even though lcov was 0.70");
 });
 
+// ───────────────────────────── reseedBaseline ───────────────────────────────
+
+test("reseedBaseline: keeps high-water marks, adds new, retains absent", () => {
+  const prev = { "src/old.ts": 0.99, "src/keep.ts": 0.8 };
+  const lcov = {
+    "src/old.ts": { linesFound: 10, linesHit: 4 }, // 0.40 — lower than 0.99
+    "src/new.ts": { linesFound: 10, linesHit: 7 }, // 0.70 — added
+  };
+  const next = reseedBaseline(prev, lcov);
+  assert.equal(next["src/old.ts"], 0.99, "high-water mark preserved");
+  assert.equal(next["src/new.ts"], 0.7, "new file added");
+  assert.equal(next["src/keep.ts"], 0.8, "absent file retained");
+});
+
+test("reseedBaseline: a genuine improvement raises the mark", () => {
+  const next = reseedBaseline(
+    { "src/a.ts": 0.6 },
+    { "src/a.ts": { linesFound: 10, linesHit: 9 } },
+  );
+  assert.equal(next["src/a.ts"], 0.9);
+});
+
 // ───────────────────────────── CLI end-to-end ───────────────────────────────
 
 function mkSandbox() {
@@ -345,6 +368,27 @@ test("CLI: --seed overwrites baseline unconditionally", () => {
     const after = JSON.parse(readFileSync(baseline, "utf8"));
     assert.equal(after.files["src/new.ts"], 40);
     assert.equal(after.files["src/old.ts"], undefined, "old entry dropped on seed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: --reseed preserves high-water marks", () => {
+  const dir = mkSandbox();
+  try {
+    const baseline = join(dir, "b.json");
+    writeFileSync(baseline, formatBaseline({ "src/old.ts": 0.99, "src/keep.ts": 0.8 }));
+    const lcov = writeLcov(dir, {
+      "src/old.ts": { lf: 10, lh: 4 }, // 40% — LOWER than the 99% high-water mark
+      "src/new.ts": { lf: 10, lh: 7 }, // 70% — added
+      // src/keep.ts absent from this lcov — must be retained
+    });
+    const r = runRatchet(dir, ["--reseed", "--lcov", lcov, "--baseline", baseline]);
+    assert.equal(r.code, 0, r.stderr);
+    const after = JSON.parse(readFileSync(baseline, "utf8"));
+    assert.equal(after.files["src/old.ts"], 99, "high-water mark not lowered");
+    assert.equal(after.files["src/new.ts"], 70, "new file added at its pct");
+    assert.equal(after.files["src/keep.ts"], 80, "absent file retained");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

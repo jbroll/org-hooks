@@ -125,8 +125,23 @@ src/components/MapView/hooks/useGpsSnap.ts
 suite with `node --test scripts/coverage-ratchet.test.mjs` (uses node:test,
 no external deps).
 
-**Force-seeding** — accept the current lcov as the new baseline after a large refactor:
+**Reseeding the baseline** — two modes for a full rebuild:
+
+- `--reseed` (preferred, monotonic): merges the current lcov over the existing
+  baseline taking the per-file **max**, and keeps baseline entries absent from
+  the lcov. High-water-mark preserving — a full reseed can never lower or forget
+  a file below its accumulated mark. This is the right choice for a routine
+  full-suite reseed.
+- `--seed` (hard reset): overwrites the baseline from the current lcov only,
+  discarding the old baseline. Use only when code was legitimately removed and
+  the old marks should be forgotten.
+
 ```sh
+# Monotonic rebuild (keeps high-water marks):
+node <ORG_HOOKS>/scripts/coverage-ratchet.mjs --reseed \
+  --lcov coverage/lcov.info --baseline coverage-baseline.json
+
+# Hard reset (drops everything not in the new lcov):
 node <ORG_HOOKS>/scripts/coverage-ratchet.mjs --seed \
   --lcov coverage/lcov.info --baseline coverage-baseline.json
 ```

@@ -34,9 +34,15 @@
 //                     freely (default: $COVERAGE_REGRESSION_WAIVER or 0.90)
 //   --src-root DIR    strip path prefix up to this dir name when normalising lcov
 //                     SF: paths (default: src)
-//   --seed            write current lcov to baseline unconditionally; no gate check.
-//                     Use to reset after a refactor. Requires lcov to exist;
-//                     ignores staged_file list.
+//   --seed            HARD RESET: write current lcov to baseline unconditionally,
+//                     discarding the existing baseline; no gate check. Use only
+//                     when code was legitimately removed and old marks should be
+//                     forgotten. Requires lcov to exist; ignores staged_file list.
+//   --reseed          MONOTONIC full rebuild: merge current lcov over the EXISTING
+//                     baseline taking the per-file max (high-water-mark preserving),
+//                     and KEEP baseline entries absent from the lcov. Never lowers
+//                     or forgets a file. No gate check; ignores staged_file list.
+//                     This is the right choice for a routine full reseed.
 //
 // Exit codes:  0 = pass  1 = coverage regression  2 = setup error (missing lcov)
 
@@ -50,6 +56,7 @@ import {
   parseLcov,
   pct,
   ratchetUp,
+  reseedBaseline,
 } from "./coverage-ratchet-lib.mjs";
 
 // ---------------------------------------------------------------------------
@@ -63,6 +70,7 @@ let tolerance = Number(process.env.COVERAGE_TOLERANCE ?? "0.005");
 let regressionWaiver = Number(process.env.COVERAGE_REGRESSION_WAIVER ?? "0.90");
 let srcRoot = "src";
 let seedMode = false;
+let reseedMode = false;
 /** @type {string[]} */
 const stagedFiles = [];
 
@@ -75,18 +83,21 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (arg === "--regression-waiver") regressionWaiver = Number(process.argv[++i]);
   else if (arg === "--src-root") srcRoot = process.argv[++i];
   else if (arg === "--seed") seedMode = true;
+  else if (arg === "--reseed") reseedMode = true;
   else if (!arg.startsWith("--")) stagedFiles.push(arg);
 }
 
-if (!seedMode && stagedFiles.length === 0) process.exit(0);
+const writeMode = seedMode || reseedMode;
+if (!writeMode && stagedFiles.length === 0) process.exit(0);
 
 // ---------------------------------------------------------------------------
 // Baseline I/O
 // ---------------------------------------------------------------------------
 
 const baselineExists = fs.existsSync(baselinePath);
-// Skip parsing in seed mode — we're about to overwrite, and the existing file
-// may be in a legacy format we no longer read.
+// Skip parsing in --seed mode — we're about to overwrite, and the existing file
+// may be in a legacy format we no longer read. --reseed must parse it: it
+// preserves the existing high-water marks.
 /** @type {Record<string, number>} */
 const baseline =
   baselineExists && !seedMode
@@ -119,8 +130,9 @@ function writeBaseline(/** @type {Record<string, number>} */ files) {
 // ---------------------------------------------------------------------------
 
 if (!fs.existsSync(lcovPath)) {
-  if (seedMode) {
-    console.error(`coverage ratchet --seed: ${lcovPath} not found — run tests with coverage first`);
+  if (writeMode) {
+    const flag = seedMode ? "--seed" : "--reseed";
+    console.error(`coverage ratchet ${flag}: ${lcovPath} not found — run tests with coverage first`);
     process.exit(2);
   }
   if (baselineExists && Object.keys(baseline).length > 0) {
@@ -134,8 +146,21 @@ if (!fs.existsSync(lcovPath)) {
 const lcov = parseLcov(fs.readFileSync(lcovPath, "utf8"), srcRoot);
 
 // ---------------------------------------------------------------------------
-// Seed mode (explicit or auto)
+// Write modes
+//   --reseed  : monotonic full rebuild — merge lcov over existing baseline,
+//               max per file, retain absent entries (never forgets a mark).
+//   --seed    : hard reset — overwrite from lcov only, discard old baseline.
+//   auto-seed : no baseline yet — first run seeds from lcov.
 // ---------------------------------------------------------------------------
+
+if (reseedMode) {
+  const next = reseedBaseline(baseline, lcov);
+  writeBaseline(next);
+  console.log(
+    `coverage ratchet --reseed: wrote ${Object.keys(next).length} files to ${baselinePath} (high-water marks preserved)`,
+  );
+  process.exit(0);
+}
 
 if (seedMode || !baselineExists) {
   const next = ratchetUp({}, lcov);
