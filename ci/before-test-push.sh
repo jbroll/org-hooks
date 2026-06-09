@@ -13,3 +13,10 @@ cd "$(git rev-parse --show-toplevel)"
 git diff --cached --name-only --diff-filter=ACMR \
     | grep -E "${CI_CHANGED_GLOB:-^(src|scripts|ci|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs)$}" \
     > ci/.changed-files || true
+
+# Optional finer e2e TIA: if the repo provides ci/changed-functions, let it emit a
+# per-function changed manifest (same opt-in convention as ci/before-test-push).
+# Best-effort: a failure removes the partial file so selection degrades to file-level.
+if [ -x ci/changed-functions ]; then
+    ci/changed-functions > ci/.changed-functions || rm -f ci/.changed-functions
+fi
