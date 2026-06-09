@@ -43,6 +43,16 @@ describe("coveredSrcFns", () => {
     ];
     assert.deepEqual(coveredSrcFns(entries, 5440), { "src/services/mapService.ts": ["createMap"] });
   });
+  it("includes a file with an empty fn list when only anonymous code executed (file-level parity)", () => {
+    // A spec that loads a file but runs only its module-scope (anonymous "")
+    // function must still attribute the file — else coarse selection under-picks.
+    const entries = [
+      { url: "http://localhost:5440/src/boot.ts", functions: [{ functionName: "", ranges: [{ count: 1 }] }] },
+      { url: "http://localhost:5440/src/idle.ts", functions: [{ functionName: "foo", ranges: [{ count: 0 }] }] },
+    ];
+    assert.deepEqual(coveredSrcFns(entries, 5440), { "src/boot.ts": [] });
+  });
+
   it("unions and sorts functions for a file appearing twice; honors port filter; {} on garbage", () => {
     const entries = [
       { url: "http://localhost:5440/src/a.ts", functions: [{ functionName: "b", ranges: [{ count: 1 }] }] },

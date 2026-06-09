@@ -40,25 +40,32 @@ export function coveredSrcFiles(entries, frontendPort) {
 export function coveredSrcFns(entries, frontendPort) {
   if (!Array.isArray(entries)) return {};
   /** @type {Record<string, Set<string>>} */
-  const acc = {};
+  const named = {};
+  /** Files with ANY executed function (named or anonymous). */
+  const executed = new Set();
   for (const e of entries) {
     const url = e?.url ?? "";
     const i = url.indexOf("/src/");
     if (i === -1) continue;
     if (frontendPort && !url.includes(`:${frontendPort}`)) continue;
     const file = url.slice(i + 1).split("?")[0];
-    const set = (acc[file] ??= new Set());
+    const set = (named[file] ??= new Set());
     for (const f of e.functions ?? []) {
-      const name = f.functionName;
-      if (!name) continue;
-      if ((f.ranges ?? []).some((r) => r.count > 0)) set.add(name);
+      if (!(f.ranges ?? []).some((r) => r.count > 0)) continue;
+      // A file counts as covered as soon as ANY function executes — including
+      // the anonymous module-scope function (functionName ""). This MUST match
+      // coveredSrcFiles' file-level set: coarse selection ("*") and the file→spec
+      // map both depend on it, and dropping anonymous-only files under-attributes
+      // boot-path files (e.g. a spec that loads mapService but runs no named fn),
+      // which silently under-selects e2e and false-drops the union ratchet.
+      // Record named functions for narrowing; the list may be empty.
+      executed.add(file);
+      if (f.functionName) set.add(f.functionName);
     }
   }
   /** @type {Record<string, string[]>} */
   const out = {};
-  for (const [file, set] of Object.entries(acc)) {
-    if (set.size) out[file] = [...set].sort();
-  }
+  for (const file of executed) out[file] = [...(named[file] ?? [])].sort();
   return out;
 }
 
