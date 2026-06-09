@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { coveredSrcFiles, mergeIntoMap, pruneUbiquitous, summarizeAreas } from "./e2e-impact-lib.mjs";
+import { coveredSrcFiles, coveredSrcFns, mergeIntoMap, pruneUbiquitous, specFiles, summarizeAreas } from "./e2e-impact-lib.mjs";
 
 /** Build a map of `n` specs: every spec covers `core`, plus its own `extra[i]`. */
 function mkMap(n, core, extra = {}) {
@@ -26,6 +26,38 @@ describe("coveredSrcFiles", () => {
   it("returns [] for empty/garbage input", () => {
     assert.deepEqual(coveredSrcFiles([], 5440), []);
     assert.deepEqual(coveredSrcFiles(null, 5440), []);
+  });
+});
+
+describe("coveredSrcFns", () => {
+  it("groups executed function names by /src/ file, dropping unexecuted and anonymous", () => {
+    const entries = [
+      { url: "http://localhost:5440/src/services/mapService.ts", functions: [
+        { functionName: "createMap", ranges: [{ count: 3 }] },
+        { functionName: "deleteMap", ranges: [{ count: 0 }] }, // unexecuted
+        { functionName: "", ranges: [{ count: 2 }] },          // anonymous
+      ]},
+      { url: "http://localhost:5440/node_modules/react/index.js", functions: [
+        { functionName: "useState", ranges: [{ count: 1 }] },  // not /src/
+      ]},
+    ];
+    assert.deepEqual(coveredSrcFns(entries, 5440), { "src/services/mapService.ts": ["createMap"] });
+  });
+  it("unions and sorts functions for a file appearing twice; honors port filter; {} on garbage", () => {
+    const entries = [
+      { url: "http://localhost:5440/src/a.ts", functions: [{ functionName: "b", ranges: [{ count: 1 }] }] },
+      { url: "http://localhost:5440/src/a.ts", functions: [{ functionName: "a", ranges: [{ count: 1 }] }] },
+      { url: "http://localhost:9999/src/z.ts", functions: [{ functionName: "z", ranges: [{ count: 1 }] }] }, // wrong port
+    ];
+    assert.deepEqual(coveredSrcFns(entries, 5440), { "src/a.ts": ["a", "b"] });
+    assert.deepEqual(coveredSrcFns(null, 5440), {});
+  });
+});
+
+describe("specFiles", () => {
+  it("returns the array for a legacy file-level entry, keys for an object entry", () => {
+    assert.deepEqual(specFiles(["src/a.ts", "src/b.ts"]), ["src/a.ts", "src/b.ts"]);
+    assert.deepEqual(specFiles({ "src/a.ts": ["fn"], "src/b.ts": [] }), ["src/a.ts", "src/b.ts"]);
   });
 });
 

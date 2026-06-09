@@ -28,6 +28,45 @@ export function coveredSrcFiles(entries, frontendPort) {
   return [...out].sort();
 }
 
+/**
+ * Like coveredSrcFiles, but groups executed function NAMES by /src/ file:
+ * { "src/a.ts": ["fnA", "fnB"], ... }. Names come from V8 `functionName`;
+ * anonymous ("") functions are dropped (they can't be matched at selection time
+ * and defer to the coarse fallback). Same URL/port filtering as coveredSrcFiles.
+ * @param {Array<{url:string, functions?: Array<{functionName?:string, ranges?: Array<{count:number}>}>}>} entries
+ * @param {number|string} [frontendPort]
+ * @returns {Record<string, string[]>}
+ */
+export function coveredSrcFns(entries, frontendPort) {
+  if (!Array.isArray(entries)) return {};
+  /** @type {Record<string, Set<string>>} */
+  const acc = {};
+  for (const e of entries) {
+    const url = e?.url ?? "";
+    const i = url.indexOf("/src/");
+    if (i === -1) continue;
+    if (frontendPort && !url.includes(`:${frontendPort}`)) continue;
+    const file = url.slice(i + 1).split("?")[0];
+    const set = (acc[file] ??= new Set());
+    for (const f of e.functions ?? []) {
+      const name = f.functionName;
+      if (!name) continue;
+      if ((f.ranges ?? []).some((r) => r.count > 0)) set.add(name);
+    }
+  }
+  /** @type {Record<string, string[]>} */
+  const out = {};
+  for (const [file, set] of Object.entries(acc)) {
+    if (set.size) out[file] = [...set].sort();
+  }
+  return out;
+}
+
+/** Files covered by a map entry, regardless of shape (array=file-level, object=fn-level). */
+export function specFiles(entry) {
+  return Array.isArray(entry) ? entry : Object.keys(entry ?? {});
+}
+
 /** Set map[specId] = sorted-unique files. */
 export function mergeIntoMap(map, specId, files) {
   map[specId] = [...new Set(files)].sort();
