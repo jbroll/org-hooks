@@ -202,7 +202,10 @@ pre-commit:
                   wt_e=$("$SCI" path "$job_e" 2>/dev/null)
                   [ -n "$wt_u" ] && { mkdir -p "$(dirname "$LCOV")"; scp -q "$ci_host:$wt_u/$LCOV" "$LCOV" 2>/dev/null || true; }
                   [ -n "$wt_e" ] && { mkdir -p "$(dirname "$E2E_LCOV")"; scp -q "$ci_host:$wt_e/$E2E_LCOV" "$E2E_LCOV" 2>/dev/null || true; }
-                  mkdir -p "$(dirname "$E2E_BASELINE_LCOV")"; scp -q "$ci_host:\$HOME/ci-flake/${WT}-e2e-fullrun.lcov" "$E2E_BASELINE_LCOV" 2>/dev/null || true
+                  # ssh+cat (not scp): OpenSSH 9+ scp uses SFTP, which does NOT
+                  # shell-expand the remote $HOME; cat over ssh does. Missing file
+                  # -> empty output -> merge treats it as no-op (graceful degrade).
+                  mkdir -p "$(dirname "$E2E_BASELINE_LCOV")"; ssh "$ci_host" "cat \$HOME/ci-flake/${WT}-e2e-fullrun.lcov" > "$E2E_BASELINE_LCOV" 2>/dev/null || true
                 fi
 
                 UNION_LCOV=${COVERAGE_UNION_LCOV:-coverage/union/lcov.info}
