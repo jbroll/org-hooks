@@ -106,3 +106,87 @@ test("CLI tolerates a missing e2e lcov (treats as empty)", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- carry-forward: full-run e2e attribution ---------------------------------
+// X is covered {1,2} by unit, {} by the per-commit e2e (TIA selected no spec for
+// it), and {3,4} by the persisted full-run e2e baseline. The merged union must
+// cover {1,2,3,4} — proving the baseline rescues files the TIA subset missed.
+const UNIT_X = [
+  "SF:src/X.ts",
+  "DA:1,1", "DA:2,1", "DA:3,0", "DA:4,0",
+  "LF:4", "LH:2",
+  "end_of_record",
+  "",
+].join("\n");
+
+const E2E_EMPTY_X = [
+  "SF:src/X.ts",
+  "DA:1,0", "DA:2,0", "DA:3,0", "DA:4,0",
+  "LF:4", "LH:0",
+  "end_of_record",
+  "",
+].join("\n");
+
+const E2E_BASELINE_X = [
+  "SF:localhost-5441/src/X.ts",
+  "DA:1,0", "DA:2,0", "DA:3,9", "DA:4,9",
+  "LF:4", "LH:2",
+  "end_of_record",
+  "",
+].join("\n");
+
+test("unionFiles is associative — baseline carry-forward fills TIA-missed lines", () => {
+  const merged = unionFiles(
+    unionFiles(parseLcovDA(UNIT_X, "src"), parseLcovDA(E2E_EMPTY_X, "src")),
+    parseLcovDA(E2E_BASELINE_X, "src"),
+  );
+  const x = merged.get("src/X.ts");
+  assert.equal([...x.values()].filter((h) => h > 0).length, 4); // {1,2}∪{}∪{3,4}
+  assert.equal(x.get(3), 9);
+  assert.equal(x.get(4), 9);
+});
+
+test("CLI --e2e-baseline carries full-run e2e attribution into the union", () => {
+  const dir = mkdtempSync(join(tmpdir(), "union-"));
+  try {
+    const unit = join(dir, "unit.info");
+    const e2e = join(dir, "e2e.info");
+    const base = join(dir, "e2e-baseline.info");
+    const out = join(dir, "union.info");
+    writeFileSync(unit, UNIT_X);
+    writeFileSync(e2e, E2E_EMPTY_X);
+    writeFileSync(base, E2E_BASELINE_X);
+    execFileSync("node", [
+      join(__dirname, "coverage-union-merge.mjs"),
+      "--unit", unit, "--e2e", e2e, "--e2e-baseline", base,
+      "--out", out, "--src-root", "src",
+    ]);
+    const text = readFileSync(out, "utf8");
+    const block = text.split("end_of_record").find((b) => b.includes("src/X.ts"));
+    assert.match(block, /LH:4/); // all 4 lines covered after carry-forward
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI without --e2e-baseline is byte-identical to today (no regression)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "union-"));
+  try {
+    const unit = join(dir, "unit.info");
+    const e2e = join(dir, "e2e.info");
+    const outA = join(dir, "a.info");
+    const outB = join(dir, "b.info");
+    writeFileSync(unit, UNIT);
+    writeFileSync(e2e, E2E);
+    const args = ["--unit", unit, "--e2e", e2e, "--src-root", "src"];
+    execFileSync("node", [join(__dirname, "coverage-union-merge.mjs"), ...args, "--out", outA]);
+    // Same invocation but pointing --e2e-baseline at a missing file → no-op.
+    execFileSync("node", [
+      join(__dirname, "coverage-union-merge.mjs"), ...args,
+      "--e2e-baseline", join(dir, "absent.info"), "--out", outB,
+    ]);
+    assert.equal(readFileSync(outA, "utf8"), readFileSync(outB, "utf8"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

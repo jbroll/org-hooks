@@ -193,18 +193,24 @@ pre-commit:
 
                 LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
                 E2E_LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
+                # Full-run e2e lcov persisted on the CI host by ci/e2e-map. WT is
+                # the repo name (== CI_REPO on the host, since push targets are
+                # ${WT}/ci/...), so it keys the same ~/ci-flake/<repo>-* path.
+                E2E_BASELINE_LCOV=${COVERAGE_E2E_BASELINE_LCOV:-coverage/e2e-fullrun/lcov.info}
                 if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
                   wt_u=$("$SCI" path "$job_u" 2>/dev/null)
                   wt_e=$("$SCI" path "$job_e" 2>/dev/null)
                   [ -n "$wt_u" ] && { mkdir -p "$(dirname "$LCOV")"; scp -q "$ci_host:$wt_u/$LCOV" "$LCOV" 2>/dev/null || true; }
                   [ -n "$wt_e" ] && { mkdir -p "$(dirname "$E2E_LCOV")"; scp -q "$ci_host:$wt_e/$E2E_LCOV" "$E2E_LCOV" 2>/dev/null || true; }
+                  mkdir -p "$(dirname "$E2E_BASELINE_LCOV")"; scp -q "$ci_host:\$HOME/ci-flake/${WT}-e2e-fullrun.lcov" "$E2E_BASELINE_LCOV" 2>/dev/null || true
                 fi
 
                 UNION_LCOV=${COVERAGE_UNION_LCOV:-coverage/union/lcov.info}
                 UNION_BASELINE=${COVERAGE_UNION_BASELINE:-coverage-union-baseline.json}
                 if [ -n "${ORG_HOOKS:-}" ] && { [ -f "$LCOV" ] || [ -f "$E2E_LCOV" ]; }; then
                   node "${ORG_HOOKS}/scripts/coverage-union-merge.mjs" \
-                    --unit "$LCOV" --e2e "$E2E_LCOV" --out "$UNION_LCOV" --src-root src || exit 1
+                    --unit "$LCOV" --e2e "$E2E_LCOV" --e2e-baseline "$E2E_BASELINE_LCOV" \
+                    --out "$UNION_LCOV" --src-root src || exit 1
                 fi
                 if [ -f "$UNION_BASELINE" ] && [ -f "$UNION_LCOV" ] && [ -n "${ORG_HOOKS:-}" ]; then
                   staged=$(git diff --cached --name-only --diff-filter=ACMR \

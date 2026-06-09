@@ -48,6 +48,24 @@ the consumer's `rc:`), never config overrides:
 | `DPDM_CIRCULAR` | `circular:1` | ts-circular exit policy; set `circular:0` for warn-only in repos with known cycles |
 | `SCI_WT` | derived | CI queue name; **not needed** — derived from the git common dir so all worktrees of a repo resolve to the repo dir name |
 | `SCI_BIN` | `/home/john/src/simple-ci/sci` | simple-ci binary; falls back to `npm run test:coverage`/`test:e2e` if absent |
+| `COVERAGE_E2E_BASELINE_LCOV` | `coverage/e2e-fullrun/lcov.info` | local path the persisted full-run e2e lcov is scp'd to and fed to the union merge as `--e2e-baseline` (full-e2e carry-forward, below) |
+
+**Full-run e2e carry-forward.** The per-commit gate runs only the **TIA-selected**
+e2e spec subset, so a source file whose real e2e coverage comes from an
+*unselected* spec (e.g. a `mediaService` that maps to no spec) is absent from the
+per-commit e2e lcov and would **false-drop** the union ratchet. To prevent that,
+`ci/e2e-map.sh` persists the full e2e lcov on the CI host (green-run only, under
+an `flock`) at `~/ci-flake/<repo>-e2e-fullrun.lcov`. The `coverage-union` job
+scp's it to `COVERAGE_E2E_BASELINE_LCOV` and unions it into the per-commit merge
+via `coverage-union-merge.mjs --e2e-baseline`. If the file is absent the scp/merge
+silently omit it and behave exactly as before.
+
+Soundness: the baseline is keyed by the line numbers from the **last green
+`ci/e2e-map`**, so for a file changed since then its e2e attribution is
+*approximate*. This is **conservative** — it biases toward NOT false-dropping and
+never toward hiding a real regression: unit coverage is always re-measured fresh
+this commit, and the periodic full e2e suite + baseline reseed catch genuine e2e
+coverage regressions. The baseline refreshes on every green `ci/e2e-map` run.
 
 The CI queue name is derived as
 `basename "$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)"` — the

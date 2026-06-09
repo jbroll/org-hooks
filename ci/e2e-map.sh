@@ -36,5 +36,17 @@ flock "${CI_FLAKE_MAP_PATH}.lock" -c "node \"$ORG_HOOKS/scripts/build-e2e-map.mj
 BUILD_EXIT=$?
 set -e
 
+# Persist the full-run e2e lcov (green-only, like the impact map above) so the
+# per-commit union gate can carry forward complete e2e attribution even when TIA
+# selected a spec subset (coverage-union-merge.mjs --e2e-baseline). Best-effort:
+# a copy failure must not fail the (passing) e2e-map run.
+CI_FLAKE_E2E_LCOV="${CI_FLAKE_E2E_FULLRUN:-$HOME/ci-flake/${CI_REPO}-e2e-fullrun.lcov}"
+mkdir -p "$(dirname "$CI_FLAKE_E2E_LCOV")"
+if flock "${CI_FLAKE_E2E_LCOV}.lock" -c "cp \"$WORKTREE/coverage/e2e/lcov.info\" \"$CI_FLAKE_E2E_LCOV\""; then
+  echo "ci/e2e-map: persisted full-run e2e lcov -> $CI_FLAKE_E2E_LCOV"
+else
+  echo "ci/e2e-map: WARNING — could not persist full-run e2e lcov (continuing)"
+fi
+
 echo "ci/e2e-map: full E2E lcov at $WORKTREE/coverage/e2e/lcov.info"
 exit "$BUILD_EXIT"
