@@ -66,6 +66,33 @@ export function manifestPath(argv) {
   return argv[2] ?? path.join("ci", ".changed-files");
 }
 
+/** Path to the changed-functions manifest, beside the changed-files manifest. */
+export function changedFnsPath(manifestPathStr) {
+  return path.join(path.dirname(manifestPathStr), ".changed-functions");
+}
+
+/**
+ * Load the changed-functions manifest: { file: string[] | "*" } | null.
+ * Missing / invalid JSON / non-object / array → null (→ file-level selection).
+ * @param {string} p
+ * @returns {Record<string, string[] | "*"> | null}
+ */
+export function loadChangedFns(p) {
+  let text;
+  try {
+    text = readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const obj = JSON.parse(text);
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+    return obj;
+  } catch {
+    return null;
+  }
+}
+
 /** Resolve the attribution-map path from $CI_FLAKE_MAP or CI_REPO-derived default. */
 export function mapPathFromEnv(env = process.env) {
   if (env.CI_FLAKE_MAP) return env.CI_FLAKE_MAP;
@@ -153,8 +180,9 @@ async function main() {
     // No CI_FLAKE_MAP/CI_REPO → treat as missing map → runAll (bootstrap).
   }
   const smoke = listSmokeSpecs();
+  const changedFns = loadChangedFns(changedFnsPath(mPath));
 
-  const result = selectSpecs({ changed, map, smoke, exclude: DEFAULT_E2E_EXCLUDE });
+  const result = selectSpecs({ changed, map, smoke, exclude: DEFAULT_E2E_EXCLUDE, changedFns });
 
   if (result.runAll) {
     process.stderr.write(`e2e-select: runAll (reason=${result.reason})\n`);

@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
+  changedFnsPath,
+  loadChangedFns,
   loadMap,
   mapPathFromEnv,
   manifestPath,
@@ -56,6 +58,35 @@ describe("loadMap", () => {
     const p = path.join(dir, "arr.json");
     writeFileSync(p, "[1,2,3]");
     assert.strictEqual(loadMap(p), null);
+  });
+});
+
+describe("loadChangedFns", () => {
+  let dir;
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), "cfn-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("parses a valid manifest object", () => {
+    const f = path.join(dir, ".changed-functions");
+    writeFileSync(f, JSON.stringify({ "src/a.ts": ["fn"], "src/b.ts": "*" }));
+    assert.deepEqual(loadChangedFns(f), { "src/a.ts": ["fn"], "src/b.ts": "*" });
+  });
+  it("returns null for missing/garbage/array", () => {
+    assert.strictEqual(loadChangedFns(path.join(dir, "nope")), null);
+    const g = path.join(dir, "g");
+    writeFileSync(g, "{not json");
+    assert.strictEqual(loadChangedFns(g), null);
+    const a = path.join(dir, "a");
+    writeFileSync(a, "[]");
+    assert.strictEqual(loadChangedFns(a), null);
+  });
+});
+
+describe("changedFnsPath", () => {
+  it("is .changed-functions beside the manifest", () => {
+    assert.strictEqual(changedFnsPath("ci/.changed-files"), path.join("ci", ".changed-functions"));
   });
 });
 
