@@ -76,3 +76,38 @@ describe("selectSpecs", () => {
     assert.ok(DEFAULT_E2E_EXCLUDE.length > 0);
   });
 });
+
+describe("selectSpecs (function-level)", () => {
+  const fnMap = {
+    "tests/uses-create.spec.ts": { "src/mapService.ts": ["createMap"] },
+    "tests/uses-delete.spec.ts": { "src/mapService.ts": ["deleteMap"] },
+    "tests/other.spec.ts": { "src/other.ts": ["x"] },
+  };
+  it("narrows to specs covering the changed function when all changed fns are known", () => {
+    const r = selectSpecs({
+      changed: ["src/mapService.ts"], map: fnMap, smoke: ["tests/smoke.spec.ts"],
+      changedFns: { "src/mapService.ts": ["createMap"] },
+    });
+    assert.deepEqual(r.specs, ["tests/smoke.spec.ts", "tests/uses-create.spec.ts"]);
+  });
+  it("coarse-falls-back when a changed fn is unrecognized (mismatch/new)", () => {
+    const r = selectSpecs({
+      changed: ["src/mapService.ts"], map: fnMap, smoke: [],
+      changedFns: { "src/mapService.ts": ["renamedOrNew"] },
+    });
+    assert.deepEqual(r.specs, ["tests/uses-create.spec.ts", "tests/uses-delete.spec.ts"]);
+  });
+  it("coarse-falls-back on the '*' whole-file marker", () => {
+    const r = selectSpecs({ changed: ["src/mapService.ts"], map: fnMap, smoke: [], changedFns: { "src/mapService.ts": "*" } });
+    assert.deepEqual(r.specs, ["tests/uses-create.spec.ts", "tests/uses-delete.spec.ts"]);
+  });
+  it("coarse when no changedFns provided (legacy path)", () => {
+    const r = selectSpecs({ changed: ["src/mapService.ts"], map: fnMap, smoke: [] });
+    assert.deepEqual(r.specs, ["tests/uses-create.spec.ts", "tests/uses-delete.spec.ts"]);
+  });
+  it("coarse when the map entry is a legacy array even if changedFns present", () => {
+    const legacy = { "tests/a.spec.ts": ["src/mapService.ts"] };
+    const r = selectSpecs({ changed: ["src/mapService.ts"], map: legacy, smoke: [], changedFns: { "src/mapService.ts": ["createMap"] } });
+    assert.deepEqual(r.specs, ["tests/a.spec.ts"]);
+  });
+});
