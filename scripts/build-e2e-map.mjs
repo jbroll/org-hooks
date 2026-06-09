@@ -100,23 +100,32 @@ export function writeMapAtomic(map, outPath) {
 
 function main() {
   const raw = aggregate(IMPACT_DIR);
-  // Statistically prune files covered by ~all specs — they carry no selection
-  // signal (see pruneUbiquitous). MAP_PRUNE_DF tunes the cutoff; set it > 1 to
-  // disable. Default 1.0 = drop only files in literally every spec.
-  const threshold = Number(process.env.MAP_PRUNE_DF ?? 1.0);
-  const { map, pruned, specCount } = pruneUbiquitous(raw, threshold);
-  const outPath = mapPath();
-  writeMapAtomic(map, outPath);
-  const distinct = new Set(Object.values(map).flat()).size;
-  console.log(`build-e2e-map: ${specCount} specs, ${distinct} discriminating src files → ${outPath}`);
 
-  // Emit the pruned (zero-signal) set as a "lazy-load candidates" report next to
-  // the map, grouped by area, so the audit loop is automated: areas with many
+  // The selection artifact is the FULL spec→files truth — we deliberately do NOT
+  // prune ubiquitous (DF=1.0) files out of it. A file covered by every spec is
+  // the strongest possible signal that changing it can break anything, so the
+  // selector must map it to all its covering specs, not to zero. Pruning created
+  // a cliff (a file in 75/76 specs selects 75; in 76/76 selects 0), silently
+  // under-selecting boot-path files (mapService, jazz/*, etc.) — which then leaned
+  // on the @smoke floor and tripped false union-coverage drops. Pruning now feeds
+  // ONLY the informational universal report below; it never mutates the map.
+  const outPath = mapPath();
+  writeMapAtomic(raw, outPath);
+  const specCount = Object.keys(raw).length;
+  const distinct = new Set(Object.values(raw).flat()).size;
+  console.log(`build-e2e-map: ${specCount} specs, ${distinct} src files → ${outPath}`);
+
+  // Derive the ubiquitous (zero-discrimination) set purely for the "lazy-load
+  // candidates" report next to the map, grouped by area: areas with many
   // universal files are eager-import candidates to move off the boot path.
+  // MAP_PRUNE_DF tunes the cutoff (set > 1 to disable); default 1.0 = files in
+  // literally every spec. This no longer affects selection.
+  const threshold = Number(process.env.MAP_PRUNE_DF ?? 1.0);
+  const { pruned } = pruneUbiquitous(raw, threshold);
   const areas = summarizeAreas(pruned);
   const reportPath = outPath.replace(/\.json$/, "") + "-universal.json";
   writeMapAtomic({ count: pruned.length, byArea: Object.fromEntries(areas), files: pruned }, reportPath);
-  console.log(`build-e2e-map: pruned ${pruned.length} ubiquitous file(s) (DF >= ${threshold}) → ${reportPath}`);
+  console.log(`build-e2e-map: ${pruned.length} ubiquitous file(s) (DF >= ${threshold}) flagged for lazy-load audit → ${reportPath}`);
   for (const [area, c] of areas.slice(0, 8)) console.log(`  ${String(c).padStart(4)}  ${area}`);
 }
 

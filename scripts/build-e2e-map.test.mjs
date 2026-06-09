@@ -2,10 +2,12 @@
 // Run with:  node --test scripts/build-e2e-map.test.mjs
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 // IMPACT_DIR is computed at import time from process.env.WORKTREE.
 // Set WORKTREE to a tmpdir before importing so the regression test is meaningful.
@@ -84,6 +86,45 @@ describe("aggregate", () => {
   it("returns {} for a missing or empty directory", () => {
     assert.deepEqual(aggregate(path.join(dir, "does-not-exist")), {});
     assert.deepEqual(aggregate(dir), {});
+  });
+});
+
+describe("main() writes the full (un-pruned) selection map", () => {
+  // Regression: ubiquitous (DF=1.0) files must stay in the written map so the
+  // selector maps a changed boot-path file to all its covering specs. Pruning
+  // them collapsed selection to zero (→ @smoke floor → false union-coverage
+  // drops). Pruning now only feeds the informational -universal.json report.
+  const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "build-e2e-map.mjs");
+
+  it("keeps ubiquitous files in the map but still flags them in the universal report", () => {
+    const wt = mkdtempSync(path.join(tmpdir(), "wt-full-"));
+    const impactDir = path.join(wt, "coverage", "e2e-impact");
+    mkdirSync(impactDir, { recursive: true });
+    // 8 specs (>= minSpecs) all cover src/core.ts (ubiquitous); s0 also covers src/feat.ts.
+    const lines = [];
+    for (let i = 0; i < 8; i++) {
+      const files = i === 0 ? ["src/core.ts", "src/feat.ts"] : ["src/core.ts"];
+      lines.push(JSON.stringify({ spec: `tests/s${i}.spec.ts`, files }));
+    }
+    writeFileSync(path.join(impactDir, "0.jsonl"), `${lines.join("\n")}\n`);
+
+    const mapOut = path.join(wt, "map.json");
+    execFileSync(process.execPath, [scriptPath], {
+      env: { ...process.env, WORKTREE: wt, CI_FLAKE_MAP: mapOut },
+      stdio: "ignore",
+    });
+
+    const map = JSON.parse(readFileSync(mapOut, "utf8"));
+    // Ubiquitous file survives in EVERY spec — not pruned to zero.
+    assert.deepEqual(map["tests/s1.spec.ts"], ["src/core.ts"]);
+    assert.deepEqual(map["tests/s0.spec.ts"], ["src/core.ts", "src/feat.ts"]);
+
+    // ...but it IS reported for the lazy-load audit.
+    const report = JSON.parse(readFileSync(`${mapOut.replace(/\.json$/, "")}-universal.json`, "utf8"));
+    assert.deepEqual(report.files, ["src/core.ts"]);
+    assert.equal(report.count, 1);
+
+    rmSync(wt, { recursive: true, force: true });
   });
 });
 
