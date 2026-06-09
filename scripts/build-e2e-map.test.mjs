@@ -31,7 +31,7 @@ function writeJsonl(name, lines) {
   writeFileSync(path.join(dir, name), `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`);
 }
 
-describe("aggregate", () => {
+describe("aggregate (legacy array lines tolerated → fn-less object)", () => {
   it("folds JSONL lines from multiple worker files into one sorted-unique map", () => {
     writeJsonl("0.jsonl", [
       { spec: "tests/a.spec.ts", files: ["src/b.ts", "src/a.ts"] },
@@ -43,8 +43,8 @@ describe("aggregate", () => {
     ]);
 
     assert.deepEqual(aggregate(dir), {
-      "tests/a.spec.ts": ["src/a.ts", "src/b.ts", "src/d.ts"],
-      "tests/c.spec.ts": ["src/c.ts"],
+      "tests/a.spec.ts": { "src/a.ts": [], "src/b.ts": [], "src/d.ts": [] },
+      "tests/c.spec.ts": { "src/c.ts": [] },
     });
   });
 
@@ -54,7 +54,7 @@ describe("aggregate", () => {
       { spec: "tests/a.spec.ts", files: ["src/b.ts", "src/a.ts"] },
     ]);
 
-    assert.deepEqual(aggregate(dir), { "tests/a.spec.ts": ["src/a.ts", "src/b.ts"] });
+    assert.deepEqual(aggregate(dir), { "tests/a.spec.ts": { "src/a.ts": [], "src/b.ts": [] } });
   });
 
   it("skips malformed lines and blank lines, keeps valid ones", () => {
@@ -71,8 +71,8 @@ describe("aggregate", () => {
     );
 
     assert.deepEqual(aggregate(dir), {
-      "tests/a.spec.ts": ["src/a.ts"],
-      "tests/b.spec.ts": ["src/b.ts"],
+      "tests/a.spec.ts": { "src/a.ts": [] },
+      "tests/b.spec.ts": { "src/b.ts": [] },
     });
   });
 
@@ -80,12 +80,30 @@ describe("aggregate", () => {
     writeJsonl("0.jsonl", [{ spec: "tests/a.spec.ts", files: ["src/a.ts"] }]);
     writeFileSync(path.join(dir, "README.txt"), "not jsonl\n");
 
-    assert.deepEqual(aggregate(dir), { "tests/a.spec.ts": ["src/a.ts"] });
+    assert.deepEqual(aggregate(dir), { "tests/a.spec.ts": { "src/a.ts": [] } });
   });
 
   it("returns {} for a missing or empty directory", () => {
     assert.deepEqual(aggregate(path.join(dir, "does-not-exist")), {});
     assert.deepEqual(aggregate(dir), {});
+  });
+});
+
+describe("aggregate (function-level)", () => {
+  it("merges per-file function sets across worker files/lines, sorted-unique", () => {
+    writeJsonl("0.jsonl", [
+      { spec: "tests/a.spec.ts", files: { "src/a.ts": ["fnB", "fnA"], "src/c.ts": ["fnC"] } },
+    ]);
+    writeJsonl("1.jsonl", [
+      { spec: "tests/a.spec.ts", files: { "src/a.ts": ["fnA", "fnD"] } }, // same spec+file → union
+    ]);
+    assert.deepEqual(aggregate(dir), {
+      "tests/a.spec.ts": { "src/a.ts": ["fnA", "fnB", "fnD"], "src/c.ts": ["fnC"] },
+    });
+  });
+  it("tolerates legacy array-shaped lines by treating files as fn-less", () => {
+    writeJsonl("0.jsonl", [{ spec: "tests/a.spec.ts", files: ["src/a.ts"] }]);
+    assert.deepEqual(aggregate(dir), { "tests/a.spec.ts": { "src/a.ts": [] } });
   });
 });
 
@@ -115,9 +133,10 @@ describe("main() writes the full (un-pruned) selection map", () => {
     });
 
     const map = JSON.parse(readFileSync(mapOut, "utf8"));
-    // Ubiquitous file survives in EVERY spec — not pruned to zero.
-    assert.deepEqual(map["tests/s1.spec.ts"], ["src/core.ts"]);
-    assert.deepEqual(map["tests/s0.spec.ts"], ["src/core.ts", "src/feat.ts"]);
+    // Ubiquitous file survives in EVERY spec — not pruned to zero. (Array JSONL
+    // input normalizes to fn-less object entries.)
+    assert.deepEqual(map["tests/s1.spec.ts"], { "src/core.ts": [] });
+    assert.deepEqual(map["tests/s0.spec.ts"], { "src/core.ts": [], "src/feat.ts": [] });
 
     // ...but it IS reported for the lazy-load audit.
     const report = JSON.parse(readFileSync(`${mapOut.replace(/\.json$/, "")}-universal.json`, "utf8"));

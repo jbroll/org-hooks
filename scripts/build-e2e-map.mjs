@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { mergeIntoMap, pruneUbiquitous, summarizeAreas } from "./e2e-impact-lib.mjs";
+import { pruneUbiquitous, specFiles, summarizeAreas } from "./e2e-impact-lib.mjs";
 
 /** Consumer worktree root — the job cd's here and exports WORKTREE. */
 const WORKTREE = process.env.WORKTREE ?? process.cwd();
@@ -30,26 +30,25 @@ export const IMPACT_DIR = path.resolve(WORKTREE, "coverage", "e2e-impact");
 
 /**
  * Read every *.jsonl file in `dir` and fold its `{ spec, files }` lines into a
- * single { spec: sorted-unique-files } map. Malformed lines are skipped. A spec
- * seen across multiple files/lines gets the union of its files. Missing dir → {}.
+ * single { spec: { file: sorted-unique-fns } } map. Each line's `files` is an
+ * object { file: [fnNames] } (function-level); a legacy array `files` is tolerated
+ * by treating its files as fn-less ({ file: [] }). A spec seen across multiple
+ * worker files/lines gets the per-file union of its functions. Missing dir → {}.
  * @param {string} dir
- * @returns {Record<string, string[]>}
+ * @returns {Record<string, Record<string, string[]>>}
  */
 export function aggregate(dir) {
-  /** @type {Record<string, string[]>} */
-  const map = {};
-  if (!existsSync(dir)) return map;
+  /** @type {Record<string, Record<string, Set<string>>>} */
+  const acc = {};
+  if (!existsSync(dir)) return {};
 
   let names;
   try {
     names = readdirSync(dir).filter((n) => n.endsWith(".jsonl")).sort();
   } catch {
-    return map;
+    return {};
   }
 
-  // Accumulate raw file lists per spec first, then merge once (sorted-unique).
-  /** @type {Record<string, string[]>} */
-  const acc = {};
   for (const name of names) {
     const full = path.join(dir, name);
     let text;
@@ -62,19 +61,33 @@ export function aggregate(dir) {
     for (const line of text.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
+      let obj;
       try {
-        const obj = JSON.parse(trimmed);
-        if (!obj || typeof obj.spec !== "string" || !Array.isArray(obj.files)) continue;
-        const files = obj.files.filter((f) => typeof f === "string");
-        (acc[obj.spec] ??= []).push(...files);
+        obj = JSON.parse(trimmed);
       } catch {
-        // malformed line — skip
+        continue; // malformed line — skip
+      }
+      if (!obj || typeof obj.spec !== "string" || !obj.files) continue;
+      // Normalize: legacy array → { file: [] }; object → { file: [fns] }.
+      const filesObj = Array.isArray(obj.files)
+        ? Object.fromEntries(obj.files.filter((f) => typeof f === "string").map((f) => [f, []]))
+        : obj.files;
+      if (typeof filesObj !== "object") continue;
+      const specAcc = (acc[obj.spec] ??= {});
+      for (const [file, fns] of Object.entries(filesObj)) {
+        const set = (specAcc[file] ??= new Set());
+        for (const fn of Array.isArray(fns) ? fns : []) {
+          if (typeof fn === "string") set.add(fn);
+        }
       }
     }
   }
 
-  for (const spec of Object.keys(acc)) {
-    mergeIntoMap(map, spec, acc[spec]);
+  /** @type {Record<string, Record<string, string[]>>} */
+  const map = {};
+  for (const [spec, files] of Object.entries(acc)) {
+    map[spec] = {};
+    for (const [file, set] of Object.entries(files)) map[spec][file] = [...set].sort();
   }
   return map;
 }
@@ -111,8 +124,11 @@ function main() {
   // ONLY the informational universal report below; it never mutates the map.
   const outPath = mapPath();
   writeMapAtomic(raw, outPath);
+  // Project to a file-level map for stats + the universal report (pruneUbiquitous
+  // is file-level by design; the written map above stays object-shaped and full).
+  const fileMap = Object.fromEntries(Object.entries(raw).map(([s, e]) => [s, specFiles(e)]));
   const specCount = Object.keys(raw).length;
-  const distinct = new Set(Object.values(raw).flat()).size;
+  const distinct = new Set(Object.values(fileMap).flat()).size;
   console.log(`build-e2e-map: ${specCount} specs, ${distinct} src files → ${outPath}`);
 
   // Derive the ubiquitous (zero-discrimination) set purely for the "lazy-load
@@ -121,7 +137,7 @@ function main() {
   // MAP_PRUNE_DF tunes the cutoff (set > 1 to disable); default 1.0 = files in
   // literally every spec. This no longer affects selection.
   const threshold = Number(process.env.MAP_PRUNE_DF ?? 1.0);
-  const { pruned } = pruneUbiquitous(raw, threshold);
+  const { pruned } = pruneUbiquitous(fileMap, threshold);
   const areas = summarizeAreas(pruned);
   const reportPath = outPath.replace(/\.json$/, "") + "-universal.json";
   writeMapAtomic({ count: pruned.length, byArea: Object.fromEntries(areas), files: pruned }, reportPath);
