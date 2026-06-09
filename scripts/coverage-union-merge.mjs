@@ -11,17 +11,19 @@
 // mediaService maps to 0 specs) is absent from the per-commit e2e lcov and would
 // false-drop. Unioning the full-run baseline restores that attribution.
 //
-// Tradeoff: the baseline encodes coverage by OLD line numbers (from the last
-// green ci/e2e-map). For a file changed since then, its e2e attribution is
-// approximate — but it is CONSERVATIVE (biases toward NOT false-dropping, never
-// toward hiding a real drop, because unit coverage is always re-measured fresh
-// and the periodic full e2e suite + reseed catch genuine e2e regressions). The
-// baseline is refreshed on every green ci/e2e-map run.
+// The baseline encodes coverage by OLD line numbers (from the last green
+// ci/e2e-map). For a file CHANGED since then, those numbers are stale — so the
+// baseline is applied via mergeBaseline (coverage-union-lib), which carries the
+// whole baseline only for files ABSENT from the fresh per-commit union and, for
+// files PRESENT (run + possibly edited), only flips EXISTING uncovered lines to
+// covered. This keeps carry-forward CONSERVATIVE: it can only raise coverage,
+// never import stale uncovered lines that would inflate LF and false-drop a
+// changed file. The baseline is refreshed on every green ci/e2e-map run.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { parseLcovDA, unionFiles, formatLcov } from "./coverage-union-lib.mjs";
+import { parseLcovDA, unionFiles, mergeBaseline, formatLcov } from "./coverage-union-lib.mjs";
 
 function arg(name, def) {
   const i = process.argv.indexOf(name);
@@ -47,7 +49,11 @@ const e2e = parseLcovDA(readOrEmpty(e2ePath), srcRoot);
 // Empty when --e2e-baseline is omitted or its file is missing → no-op union,
 // keeping behaviour byte-identical to the unit∪e2e-only case.
 const e2eBaseline = parseLcovDA(readOrEmpty(e2eBaselinePath), srcRoot);
-const merged = unionFiles(unionFiles(unit, e2e), e2eBaseline);
+// Carry the baseline forward onto the fresh union. mergeBaseline (NOT a third
+// plain union) prevents a changed file's shifted lines from importing the
+// baseline's stale old-numbered uncovered DA entries, which inflated LF and
+// false-dropped the file (e.g. mediaService 97%→88% after an edit).
+const merged = mergeBaseline(unionFiles(unit, e2e), e2eBaseline);
 
 mkdirSync(dirname(outPath), { recursive: true });
 writeFileSync(outPath, formatLcov(merged));

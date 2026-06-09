@@ -65,6 +65,43 @@ export function unionFiles(a, b) {
 }
 
 /**
+ * Carry forward a full-run e2e baseline onto the fresh per-commit union WITHOUT
+ * inflating the denominator.
+ *
+ * - File ABSENT from `fresh` (the TIA subset simply didn't run it this commit):
+ *   carry the whole baseline. The file is unchanged, so its line numbers still
+ *   align and it is the only coverage estimate we have.
+ * - File PRESENT in `fresh` (it WAS run, and may have been edited so its lines
+ *   shifted): only let the baseline flip EXISTING uncovered lines to covered.
+ *   Never add baseline-only lines — a changed file's stale, old-numbered
+ *   `DA:n,0` entries would otherwise inflate LF and FALSE-DROP it, even though
+ *   its fresh unit∪e2e coverage is intact.
+ *
+ * @param {FileLines} fresh  unit ∪ per-commit e2e
+ * @param {FileLines} baseline  persisted full-run e2e
+ * @returns {FileLines}
+ */
+export function mergeBaseline(fresh, baseline) {
+  /** @type {FileLines} */
+  const out = new Map();
+  for (const [sf, lines] of fresh) out.set(sf, new Map(lines));
+  for (const [sf, blines] of baseline) {
+    const cur = out.get(sf);
+    if (!cur) {
+      out.set(sf, new Map(blines));
+      continue;
+    }
+    for (const [n, h] of cur) {
+      if (h === 0) {
+        const bh = blines.get(n) ?? 0;
+        if (bh > 0) cur.set(n, bh);
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Serialise to a minimal valid lcov (SF/DA/LF/LH/end_of_record). LF/LH are
  * recomputed from the unioned DA set, so they encode the per-line union.
  * @param {FileLines} files

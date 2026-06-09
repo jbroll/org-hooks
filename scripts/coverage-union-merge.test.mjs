@@ -9,7 +9,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 
-import { parseLcovDA, unionFiles, formatLcov } from "./coverage-union-lib.mjs";
+import { parseLcovDA, unionFiles, mergeBaseline, formatLcov } from "./coverage-union-lib.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -167,6 +167,51 @@ test("CLI --e2e-baseline carries full-run e2e attribution into the union", () =>
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- mergeBaseline: changed-file safety (no denominator inflation) -----------
+// Regression for a CHANGED file: fresh has lines 1-3 (line 1 covered). The
+// baseline, at OLD line numbers, covers line 2 but ALSO carries a stale
+// uncovered line 99 that no longer exists. mergeBaseline must flip line 2 to
+// covered WITHOUT importing line 99 — else the changed file's LF inflates and it
+// false-drops (the mediaService 97%→88% bug).
+const FRESH_CHANGED = [
+  "SF:src/Y.ts",
+  "DA:1,1", "DA:2,0", "DA:3,0",
+  "LF:3", "LH:1",
+  "end_of_record",
+  "",
+].join("\n");
+
+const BASELINE_STALE = [
+  "SF:localhost-5441/src/Y.ts",
+  "DA:1,0", "DA:2,5", "DA:99,0",
+  "LF:3", "LH:1",
+  "end_of_record",
+  "",
+].join("\n");
+
+test("mergeBaseline flips existing uncovered lines but never imports stale baseline-only lines", () => {
+  const merged = mergeBaseline(parseLcovDA(FRESH_CHANGED, "src"), parseLcovDA(BASELINE_STALE, "src"));
+  const y = merged.get("src/Y.ts");
+  assert.equal(y.size, 3); // line 99 NOT imported → denominator stays 3
+  assert.equal(y.get(2), 5); // existing uncovered line flipped to covered
+  assert.equal(y.has(99), false);
+});
+
+const BASELINE_ABSENT = [
+  "SF:localhost-5441/src/Z.ts",
+  "DA:1,3", "DA:2,3",
+  "LF:2", "LH:2",
+  "end_of_record",
+  "",
+].join("\n");
+
+test("mergeBaseline carries the whole baseline for files ABSENT from fresh (TIA missed)", () => {
+  const merged = mergeBaseline(parseLcovDA(FRESH_CHANGED, "src"), parseLcovDA(BASELINE_ABSENT, "src"));
+  assert.ok(merged.has("src/Z.ts"));
+  assert.equal(merged.get("src/Z.ts").get(1), 3);
+  assert.equal(merged.get("src/Y.ts").size, 3); // unrelated fresh file untouched
 });
 
 test("CLI without --e2e-baseline is byte-identical to today (no regression)", () => {
