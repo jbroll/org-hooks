@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-// Jazz narrow-waist guard. Bans VALUE imports from bare "jazz-tools" outside the
-// two blessed dirs (src/jazz/** runtime adapter, src/schema/** schema defs), so
-// app code expresses intent through the adapter/schema and the eventual Jazz v2
-// migration touches a handful of modules, not the whole tree.
+// Jazz narrow-waist guard. Bans VALUE imports from "jazz-tools" and
+// "jazz-tools/react" outside the two blessed dirs (src/jazz/** runtime + hooks
+// adapter, src/schema/** schema defs), so app code expresses intent through the
+// adapter/schema and the eventual Jazz v2 migration touches a handful of modules
+// (the adapter + the providers), not the whole tree.
 //
 // Allowed everywhere (NOT flagged):
-//   - `import type { … } from "jazz-tools"`   (types are migration-cheap)
-//   - `jazz-tools/react`, `jazz-tools/testing` subpaths (different module path)
-// Exempt files: src/jazz/**, src/schema/**, src/test/**, *.{test,spec}.*, *.d.ts.
+//   - `import type { … } from "jazz-tools"` / `"jazz-tools/react"` (types are
+//     migration-cheap)
+//   - `jazz-tools/testing` and other subpaths (e.g. better-auth) — different path
+// Exempt files: src/jazz/**, src/schema/**, src/test/**, *.{test,spec}.*, *.d.ts,
+//   and `.jazz-waist-allow` entries (the React providers that mount JazzProvider).
 //
 // Usage:  node check-jazz-value-import-ban.mjs [srcDir=src]
 // Allowlist: `.jazz-waist-allow` (one path-substring per line, '#' comments).
@@ -50,11 +53,12 @@ function walk(dir, out = []) {
   return out;
 }
 
-// An import statement whose source is EXACTLY "jazz-tools" (a subpath like
-// "jazz-tools/react" has a `/` before the closing quote and won't match). The
-// clause is `[^;]*?` so it spans a multi-line brace block but cannot cross a
-// `;` into a previous import; `^` (m flag) anchors each statement's start.
-const IMPORT = /^\s*import\s+([^;]*?)\s+from\s+["']jazz-tools["']/gm;
+// An import statement whose source is EXACTLY "jazz-tools" or "jazz-tools/react"
+// (other subpaths like "jazz-tools/testing" / "jazz-tools/better-auth/*" have
+// extra text before the closing quote and won't match). The clause is `[^;]*?`
+// so it spans a multi-line brace block but cannot cross a `;` into a previous
+// import; `^` (m flag) anchors each statement's start.
+const IMPORT = /^\s*import\s+([^;]*?)\s+from\s+["']jazz-tools(?:\/react)?["']/gm;
 
 // True if the import clause pulls in at least one VALUE binding (vs. type-only).
 function hasValueBinding(clause) {
@@ -89,9 +93,9 @@ for (const file of walk(root)) {
 
 if (failed) {
   console.error(
-    `\n${failed} value import(s) from bare 'jazz-tools' outside src/jazz/** and ` +
-      `src/schema/**.\nUse the @/jazz/* adapter or @/schema — \`import type\` and ` +
-      `jazz-tools/react are allowed.`,
+    `\n${failed} value import(s) from 'jazz-tools' or 'jazz-tools/react' outside ` +
+      `src/jazz/** and src/schema/**.\nUse the @/jazz/* adapter or @/schema — ` +
+      `\`import type\` and the jazz-tools/testing subpath are allowed.`,
   );
   process.exit(1);
 }
