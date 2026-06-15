@@ -69,3 +69,10 @@ pre-commit:
     ts-test-size-cap:
       glob: "*.{test,spec}.{ts,tsx,js,jsx}"
       run: '"${ORG_HOOKS}/scripts/hygiene.sh" test-size-cap {staged_files}'
+    ts-comment-hygiene:
+      # Block TS-redundant / rot-prone TSDoc tags (@example/@param/@returns/
+      # @type/@typedef) in source AND tests — a test is itself an example, so
+      # it never needs the tag. Fail-on-touch (no grandfather); escape hatch in
+      # .no-jsdoc-tags-allow.
+      glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" comment-hygiene {staged_files}'

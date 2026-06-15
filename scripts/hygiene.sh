@@ -87,6 +87,39 @@ case "$cmd" in
       fi
     done
     ;;
+  comment-hygiene)
+    # Ban TSDoc tags TypeScript already encodes (@param/@returns/@type/@typedef
+    # only restate the signature) or that silently rot (@example). There is no
+    # good home for @example: the tests and call sites ARE the examples, and
+    # they're type-checked so they can't drift — a JSDoc sample only rots.
+    # Applies to TESTS too (a test is itself an example; it never needs an
+    # @example tag, and @param/etc. are just as redundant there).
+    # NO grandfathering: the gate only sees STAGED files, so untouched legacy
+    # keeps its tags, but touching a file forces cleaning it ("change it → fix
+    # it" drives the drain). Genuine must-keeps (real JSDoc-typed .js, generated
+    # files) go one-path-substring-per-line in .no-jsdoc-tags-allow, with a reason.
+    pat='^[[:space:]]*(/?\*+|//)[[:space:]]*@(example|param|returns?|typedef|type)\b'
+    allow_file=".no-jsdoc-tags-allow"
+    is_allowed() {
+      [ -f "$allow_file" ] || return 1
+      while IFS= read -r p; do
+        p="${p%%#*}"; p="$(echo "$p" | xargs 2>/dev/null || true)"
+        [ -n "$p" ] || continue
+        case "$1" in *"$p"*) return 0;; esac
+      done < "$allow_file"
+      return 1
+    }
+    for f in "$@"; do
+      [ -f "$f" ] || continue
+      is_allowed "$f" && continue
+      hits=$(grep -nE "$pat" "$f" || true)
+      if [ -n "$hits" ]; then
+        echo "  $f: forbidden TSDoc tag(s). TS already states @param/@returns/@type/@typedef; tests + call sites are the examples, so delete @example (narrative → docs/). Genuine cases: $allow_file."
+        printf '%s\n' "$hits" | sed 's/^/    /'
+        fail=1
+      fi
+    done
+    ;;
   fully-staged)
     # Gate soundness: the GPU test job rsyncs the WORKING TREE, but the commit
     # captures only STAGED files. If they differ, the gate tests something other
