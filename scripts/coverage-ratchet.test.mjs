@@ -168,6 +168,11 @@ test("checkOne: no baseline + no lcov → fail", () => {
   assert.match(r.reason, /no entry in lcov/);
 });
 
+test("checkOne: .d.ts is never gated (no runtime lines, never in lcov)", () => {
+  assert.equal(checkOne("src/types/foo.d.ts", undefined, undefined, OPTS), null);
+  assert.equal(checkOne("src/foo.d.ts", undefined, { linesFound: 0, linesHit: 0 }, OPTS), null);
+});
+
 test("checkOne: baseline + cur ≥ baseline → pass", () => {
   assert.equal(checkOne("src/a.ts", 0.6, { linesFound: 10, linesHit: 6 }, OPTS), null);
 });

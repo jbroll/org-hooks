@@ -127,6 +127,10 @@ export function formatBaseline(files) {
  * @returns {{ file: string; reason: string }|null}
  */
 export function checkOne(file, prevPct, cur, { floor, tolerance, regressionWaiver = 1 }) {
+  // .d.ts files are pure type declarations — erased at compile, zero runtime
+  // lines, so they can never appear in lcov. Never gate them (no per-repo
+  // exclude needed). Applies to the whole extension, not individual files.
+  if (file.endsWith(".d.ts")) return null;
   if (prevPct === undefined) {
     if (!cur)
       return { file, reason: "file not exercised by tests (no entry in lcov)" };
