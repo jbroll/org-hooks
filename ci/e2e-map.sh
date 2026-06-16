@@ -8,6 +8,21 @@ set -euo pipefail
 . "${CI_SETUP:?CI_SETUP must point at the consumer setup callback}"
 cd "$WORKTREE"
 
+# Anchor the baseline to the CONTENT tree of the rsync'd source (a git tree
+# hash), NOT origin/HEAD. The per-commit union gate diffs the baseline against
+# this anchor to remap line-shifting edits (coverage-union-merge.mjs
+# --e2e-baseline-sha accepts any tree-ish). A tree hash is correct no matter
+# which worktree triggered the reseed (even one ahead of main): it reflects the
+# code actually measured, and the local repo holds that tree (it is the pushing
+# worktree's HEAD tree). A commit sha would be origin/HEAD here, which mismatches
+# the rsync'd content. Captured pre-build on a throwaway index so generated
+# artifacts and the real index are untouched. Best-effort; failures degrade the
+# per-commit gate to raw line numbers (its prior behaviour).
+_idx="$(mktemp -u)"
+GIT_INDEX_FILE="$_idx" git add -A >/dev/null 2>&1 || true
+BASE_TREE="$(GIT_INDEX_FILE="$_idx" git write-tree 2>/dev/null || true)"
+rm -f "$_idx"
+
 export CI=true
 export E2E_BUILD_IMPACT_MAP=1
 export PLAYWRIGHT_WORKERS="${PLAYWRIGHT_WORKERS:-2}"
@@ -44,14 +59,12 @@ CI_FLAKE_E2E_LCOV="${CI_FLAKE_E2E_FULLRUN:-$HOME/ci-flake/${CI_REPO}-e2e-fullrun
 mkdir -p "$(dirname "$CI_FLAKE_E2E_LCOV")"
 if flock "${CI_FLAKE_E2E_LCOV}.lock" -c "cp \"$WORKTREE/coverage/e2e/lcov.info\" \"$CI_FLAKE_E2E_LCOV\""; then
   echo "ci/e2e-map: persisted full-run e2e lcov -> $CI_FLAKE_E2E_LCOV"
-  # Persist the commit this baseline was measured on. The per-commit union gate
-  # remaps the baseline's line numbers through `git diff <sha>` so a later
-  # line-shifting edit (e.g. a barrel→leaf import split) stays coverage-neutral
-  # (coverage-union-merge.mjs --e2e-baseline-sha). Best-effort.
-  BASE_SHA="$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null || true)"
-  if [ -n "$BASE_SHA" ]; then
-    flock "${CI_FLAKE_E2E_LCOV}.lock" -c "printf '%s\n' '$BASE_SHA' > \"${CI_FLAKE_E2E_LCOV%.lcov}.sha\"" \
-      && echo "ci/e2e-map: persisted baseline sha $BASE_SHA"
+  # Persist the source-tree anchor captured pre-build (see top). The per-commit
+  # union gate remaps the baseline through `git diff <tree>` so a later
+  # line-shifting edit stays coverage-neutral. Best-effort.
+  if [ -n "${BASE_TREE:-}" ]; then
+    flock "${CI_FLAKE_E2E_LCOV}.lock" -c "printf '%s\n' '$BASE_TREE' > \"${CI_FLAKE_E2E_LCOV%.lcov}.sha\"" \
+      && echo "ci/e2e-map: persisted baseline tree $BASE_TREE"
   fi
 else
   echo "ci/e2e-map: WARNING — could not persist full-run e2e lcov (continuing)"

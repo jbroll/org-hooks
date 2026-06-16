@@ -341,7 +341,7 @@ test("CLI --e2e-baseline-sha remaps the baseline through a real git diff (no fal
     mkdirpFile(dir, "src/F.tsx", ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p"].join("\n") + "\n");
     run("git", "add", "-A");
     run("git", "commit", "-qm", "old");
-    const sha = run("git", "rev-parse", "HEAD").trim();
+    const sha = run("git", "rev-parse", "HEAD^{tree}").trim(); // tree-ish anchor, as e2e-map now persists
     // Insert 2 import lines at the top → executable lines shift +2.
     mkdirpFile(dir, "src/F.tsx", "import x\nimport y\n" + ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p"].join("\n") + "\n");
     // baseline (old): lines 12..16 covered by e2e. unit (new): only line 14.
