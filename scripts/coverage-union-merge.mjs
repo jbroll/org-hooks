@@ -20,10 +20,18 @@
 // never import stale uncovered lines that would inflate LF and false-drop a
 // changed file. The baseline is refreshed on every green ci/e2e-map run.
 
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { parseLcovDA, unionFiles, mergeBaseline, formatLcov } from "./coverage-union-lib.mjs";
+import {
+  parseLcovDA,
+  unionFiles,
+  mergeBaseline,
+  formatLcov,
+  parseDiffHunks,
+  remapBaseline,
+} from "./coverage-union-lib.mjs";
 
 function arg(name, def) {
   const i = process.argv.indexOf(name);
@@ -41,6 +49,13 @@ function readOrEmpty(path) {
 const unitPath = arg("--unit", "coverage/lcov.info");
 const e2ePath = arg("--e2e", "coverage/e2e/lcov.info");
 const e2eBaselinePath = arg("--e2e-baseline", "");
+// Commit the e2e baseline was captured on (persisted by ci/e2e-map). When given,
+// the baseline's OLD line numbers are remapped onto the current source through
+// `git diff <sha>` BEFORE carry-forward, so a line-shifting edit since then
+// (e.g. a barrel→leaf import split) doesn't misalign the baseline and
+// false-drop an e2e-dominated file. Omitted/unresolvable → byte-identical to the
+// previous (raw line-number) behaviour.
+const e2eBaselineSha = arg("--e2e-baseline-sha", "");
 const outPath = arg("--out", "coverage/union/lcov.info");
 const srcRoot = arg("--src-root", "src");
 
@@ -48,7 +63,23 @@ const unit = parseLcovDA(readOrEmpty(unitPath), srcRoot);
 const e2e = parseLcovDA(readOrEmpty(e2ePath), srcRoot);
 // Empty when --e2e-baseline is omitted or its file is missing → no-op union,
 // keeping behaviour byte-identical to the unit∪e2e-only case.
-const e2eBaseline = parseLcovDA(readOrEmpty(e2eBaselinePath), srcRoot);
+let e2eBaseline = parseLcovDA(readOrEmpty(e2eBaselinePath), srcRoot);
+if (e2eBaselineSha && e2eBaseline.size) {
+  try {
+    // -U0 vs the working tree (what the unit/e2e lcovs were measured on).
+    const diff = execFileSync("git", ["diff", "--no-color", "-U0", e2eBaselineSha, "--"], {
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+    });
+    e2eBaseline = remapBaseline(e2eBaseline, parseDiffHunks(diff, srcRoot));
+  } catch (e) {
+    // git not reachable / SHA not in history (shallow clone, dropped ref) →
+    // degrade to the raw baseline rather than crash the gate.
+    process.stderr.write(
+      `coverage-union-merge: baseline line-remap skipped (${String(e.message).split("\n")[0]})\n`,
+    );
+  }
+}
 // Carry the baseline forward onto the fresh union. mergeBaseline (NOT a third
 // plain union) prevents a changed file's shifted lines from importing the
 // baseline's stale old-numbered uncovered DA entries, which inflated LF and

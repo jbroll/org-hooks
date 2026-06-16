@@ -209,6 +209,11 @@ pre-commit:
                   # shell-expand the remote $HOME; cat over ssh does. Missing file
                   # -> empty output -> merge treats it as no-op (graceful degrade).
                   mkdir -p "$(dirname "$E2E_BASELINE_LCOV")"; ssh "$ci_host" "cat \$HOME/ci-flake/${WT}-e2e-fullrun.lcov" > "$E2E_BASELINE_LCOV" 2>/dev/null || true
+                  # Commit the baseline was measured on. Lets the merge remap the
+                  # baseline's line numbers onto current source (git diff), so a
+                  # line-shifting edit since then stays coverage-neutral. Missing
+                  # -> empty -> merge uses raw line numbers (prior behaviour).
+                  E2E_BASELINE_SHA=$(ssh "$ci_host" "cat \$HOME/ci-flake/${WT}-e2e-fullrun.sha" 2>/dev/null | tr -d '[:space:]' || true)
                 fi
 
                 UNION_LCOV=${COVERAGE_UNION_LCOV:-coverage/union/lcov.info}
@@ -216,6 +221,7 @@ pre-commit:
                 if [ -n "${ORG_HOOKS:-}" ] && { [ -f "$LCOV" ] || [ -f "$E2E_LCOV" ]; }; then
                   node "${ORG_HOOKS}/scripts/coverage-union-merge.mjs" \
                     --unit "$LCOV" --e2e "$E2E_LCOV" --e2e-baseline "$E2E_BASELINE_LCOV" \
+                    ${E2E_BASELINE_SHA:+--e2e-baseline-sha "$E2E_BASELINE_SHA"} \
                     --out "$UNION_LCOV" --src-root src || exit 1
                 fi
                 if [ -f "$UNION_BASELINE" ] && [ -f "$UNION_LCOV" ] && [ -n "${ORG_HOOKS:-}" ]; then

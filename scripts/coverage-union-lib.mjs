@@ -124,3 +124,98 @@ export function formatLcov(files) {
   }
   return out.length ? out.join("\n") + "\n" : "";
 }
+
+/** @typedef {{oldStart:number,oldCount:number,newStart:number,newCount:number}} Hunk */
+
+/**
+ * Parse `git diff --no-color -U0 <baselineSha>` into canonicalSF -> Hunk[].
+ * The baseline lcov is keyed to the OLD line numbers from the last green
+ * ci/e2e-map; a line-shifting edit since then (e.g. a barrel→leaf import split
+ * adding N import lines) moves every line below, so the baseline misaligns and
+ * mergeBaseline carries coverage onto the WRONG lines, false-dropping an
+ * e2e-dominated file. These hunks drive remapBaseline (old line -> new line).
+ * @param {string} diffText
+ * @param {string} srcRoot
+ * @returns {Map<string, Hunk[]>}
+ */
+export function parseDiffHunks(diffText, srcRoot) {
+  /** @type {Map<string, Hunk[]>} */
+  const out = new Map();
+  /** @type {Hunk[]|null} */
+  let cur = null;
+  for (const raw of diffText.split("\n")) {
+    if (raw.startsWith("+++ ")) {
+      const p = raw.slice(4).trim().replace(/^b\//, "");
+      if (p === "/dev/null") {
+        cur = null;
+        continue;
+      }
+      const sf = normalisePath(p, srcRoot);
+      cur = [];
+      out.set(sf, cur);
+    } else if (raw.startsWith("@@") && cur) {
+      const m = raw.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+      if (m) {
+        cur.push({
+          oldStart: Number(m[1]),
+          oldCount: m[2] === undefined ? 1 : Number(m[2]),
+          newStart: Number(m[3]),
+          newCount: m[4] === undefined ? 1 : Number(m[4]),
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Map an OLD line number to its NEW position through diff hunks, or null if the
+ * line was deleted/modified (its coverage must NOT carry — that code changed, so
+ * it should be measured fresh, not inherited). Each hunk independently shifts
+ * lines that fall AFTER its old range; a pure insertion (`-X,0`) shifts only
+ * lines strictly after X.
+ * @param {number} oldLine
+ * @param {Hunk[]} hunks
+ * @returns {number|null}
+ */
+export function remapLine(oldLine, hunks) {
+  let n = oldLine;
+  for (const h of hunks) {
+    if (h.oldCount === 0) {
+      if (oldLine > h.oldStart) n += h.newCount;
+    } else {
+      if (oldLine >= h.oldStart && oldLine < h.oldStart + h.oldCount) return null;
+      if (oldLine >= h.oldStart + h.oldCount) n += h.newCount - h.oldCount;
+    }
+  }
+  return n;
+}
+
+/**
+ * Remap a stale e2e baseline onto current line numbers. Files ABSENT from
+ * `hunksByFile` are unchanged since the baseline → kept verbatim. Files PRESENT
+ * are remapped per line; deleted/modified lines drop out so they cannot carry
+ * stale coverage. This is what makes a line-shifting edit coverage-neutral.
+ * @param {FileLines} baseline
+ * @param {Map<string, Hunk[]>} hunksByFile
+ * @returns {FileLines}
+ */
+export function remapBaseline(baseline, hunksByFile) {
+  /** @type {FileLines} */
+  const out = new Map();
+  for (const [sf, blines] of baseline) {
+    const hunks = hunksByFile.get(sf);
+    if (!hunks) {
+      out.set(sf, new Map(blines));
+      continue;
+    }
+    /** @type {Map<number, number>} */
+    const remapped = new Map();
+    for (const [n, h] of blines) {
+      const nn = remapLine(n, hunks);
+      if (nn !== null) remapped.set(nn, Math.max(remapped.get(nn) ?? 0, h));
+    }
+    out.set(sf, remapped);
+  }
+  return out;
+}

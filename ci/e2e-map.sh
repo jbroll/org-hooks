@@ -44,6 +44,15 @@ CI_FLAKE_E2E_LCOV="${CI_FLAKE_E2E_FULLRUN:-$HOME/ci-flake/${CI_REPO}-e2e-fullrun
 mkdir -p "$(dirname "$CI_FLAKE_E2E_LCOV")"
 if flock "${CI_FLAKE_E2E_LCOV}.lock" -c "cp \"$WORKTREE/coverage/e2e/lcov.info\" \"$CI_FLAKE_E2E_LCOV\""; then
   echo "ci/e2e-map: persisted full-run e2e lcov -> $CI_FLAKE_E2E_LCOV"
+  # Persist the commit this baseline was measured on. The per-commit union gate
+  # remaps the baseline's line numbers through `git diff <sha>` so a later
+  # line-shifting edit (e.g. a barrel→leaf import split) stays coverage-neutral
+  # (coverage-union-merge.mjs --e2e-baseline-sha). Best-effort.
+  BASE_SHA="$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null || true)"
+  if [ -n "$BASE_SHA" ]; then
+    flock "${CI_FLAKE_E2E_LCOV}.lock" -c "printf '%s\n' '$BASE_SHA' > \"${CI_FLAKE_E2E_LCOV%.lcov}.sha\"" \
+      && echo "ci/e2e-map: persisted baseline sha $BASE_SHA"
+  fi
 else
   echo "ci/e2e-map: WARNING — could not persist full-run e2e lcov (continuing)"
 fi
