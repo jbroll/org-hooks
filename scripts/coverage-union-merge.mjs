@@ -31,6 +31,7 @@ import {
   formatLcov,
   parseDiffHunks,
   remapBaseline,
+  scrubIncidentalUnit,
 } from "./coverage-union-lib.mjs";
 
 function arg(name, def) {
@@ -80,14 +81,21 @@ if (e2eBaselineSha && e2eBaseline.size) {
     );
   }
 }
+// Scrub incidental unit instrumentation: a boot-path file with no unit test
+// (App.tsx) gets transitively loaded by `vitest --changed`, so v8 attributes it
+// uncovered lines the monocart e2e baseline can never cover — non-deterministic
+// denominator noise. Drop unit's zero-coverage entries for e2e-covered files so
+// their coverage comes from e2e (+baseline) alone.
+const scrubbedUnit = scrubIncidentalUnit(unit, unionFiles(e2e, e2eBaseline));
 // Carry the baseline forward onto the fresh union. mergeBaseline (NOT a third
 // plain union) prevents a changed file's shifted lines from importing the
 // baseline's stale old-numbered uncovered DA entries, which inflated LF and
 // false-dropped the file (e.g. mediaService 97%→88% after an edit).
-const merged = mergeBaseline(unionFiles(unit, e2e), e2eBaseline);
+const merged = mergeBaseline(unionFiles(scrubbedUnit, e2e), e2eBaseline);
 
 mkdirSync(dirname(outPath), { recursive: true });
 writeFileSync(outPath, formatLcov(merged));
+const scrubbed = unit.size - scrubbedUnit.size;
 process.stderr.write(
-  `union: ${unit.size} unit + ${e2e.size} e2e + ${e2eBaseline.size} e2e-baseline -> ${merged.size} files -> ${outPath}\n`,
+  `union: ${unit.size} unit${scrubbed ? ` (-${scrubbed} incidental)` : ""} + ${e2e.size} e2e + ${e2eBaseline.size} e2e-baseline -> ${merged.size} files -> ${outPath}\n`,
 );

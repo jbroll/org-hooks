@@ -17,6 +17,7 @@ import {
   parseDiffHunks,
   remapLine,
   remapBaseline,
+  scrubIncidentalUnit,
 } from "./coverage-union-lib.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -239,6 +240,73 @@ test("CLI without --e2e-baseline is byte-identical to today (no regression)", ()
       "--e2e-baseline", join(dir, "absent.info"), "--out", outB,
     ]);
     assert.equal(readFileSync(outA, "utf8"), readFileSync(outB, "utf8"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── incidental-unit scrub (cross-instrumenter denominator noise) ──────────────
+// A boot-path file (App.tsx) has NO unit test. The per-commit `vitest --changed`
+// run still transitively LOADS it, so v8 instruments it at line numbers that the
+// monocart e2e baseline never uses — all uncovered. Those lines can never be
+// covered (different instrumenter) and inflate the denominator. Worse, WHICH v8
+// lines appear depends on the --changed selection, so the file false-drops
+// non-deterministically on edits. Scrub: when unit covers ZERO lines of a file
+// that e2e DOES cover, drop unit's incidental entries before the union.
+const UNIT_INCIDENTAL = [
+  "SF:src/Boot.tsx", // transitively loaded, never exercised by unit (v8 lines 100..102)
+  "DA:100,0", "DA:101,0", "DA:102,0",
+  "LF:3", "LH:0",
+  "end_of_record",
+  "SF:src/Real.ts", // genuinely unit-tested — must NOT be scrubbed
+  "DA:1,1", "DA:2,0",
+  "LF:2", "LH:1",
+  "end_of_record",
+  "",
+].join("\n");
+
+const E2E_BOOT = [
+  "SF:localhost-5441/src/Boot.tsx", // monocart lines 1..4, 1-3 covered
+  "DA:1,7", "DA:2,7", "DA:3,7", "DA:4,0",
+  "LF:4", "LH:3",
+  "end_of_record",
+  "",
+].join("\n");
+
+test("scrubIncidentalUnit drops zero-coverage unit files that e2e covers, keeps the rest", () => {
+  const unit = parseLcovDA(UNIT_INCIDENTAL, "src");
+  const e2e = parseLcovDA(E2E_BOOT, "src");
+  const scrubbed = scrubIncidentalUnit(unit, e2e);
+  assert.equal(scrubbed.has("src/Boot.tsx"), false); // incidental v8 noise removed
+  assert.ok(scrubbed.has("src/Real.ts")); // real unit coverage preserved
+});
+
+test("scrubIncidentalUnit keeps a zero-coverage unit file e2e does NOT cover (genuinely untested)", () => {
+  const unit = parseLcovDA(
+    ["SF:src/Orphan.ts", "DA:1,0", "DA:2,0", "LF:2", "LH:0", "end_of_record", ""].join("\n"),
+    "src",
+  );
+  const scrubbed = scrubIncidentalUnit(unit, new Map());
+  assert.ok(scrubbed.has("src/Orphan.ts")); // no e2e coverage → keep, report as 0%
+});
+
+test("CLI scrubs incidental unit noise so an e2e-dominated boot file does not false-drop", () => {
+  const dir = mkdtempSync(join(tmpdir(), "union-scrub-"));
+  try {
+    const unit = join(dir, "unit.info");
+    const e2e = join(dir, "e2e.info");
+    const out = join(dir, "union.info");
+    writeFileSync(unit, UNIT_INCIDENTAL);
+    writeFileSync(e2e, E2E_BOOT);
+    execFileSync("node", [
+      join(__dirname, "coverage-union-merge.mjs"),
+      "--unit", unit, "--e2e", e2e, "--out", out, "--src-root", "src",
+    ]);
+    const text = readFileSync(out, "utf8");
+    const block = text.split("end_of_record").find((b) => b.includes("src/Boot.tsx"));
+    // Denominator is e2e's 4 lines (3 covered) — NOT 7 (with v8 noise → 3/7=43%).
+    assert.match(block, /LF:4/);
+    assert.match(block, /LH:3/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

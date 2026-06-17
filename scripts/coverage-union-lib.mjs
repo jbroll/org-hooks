@@ -65,6 +65,36 @@ export function unionFiles(a, b) {
 }
 
 /**
+ * Drop incidental unit instrumentation that only inflates the denominator.
+ *
+ * A boot-path file with no unit test (e.g. App.tsx — only Main.tsx imports it)
+ * still gets LOADED by `vitest --changed` whenever a changed test transitively
+ * pulls it in. v8 then instruments it at line numbers the monocart e2e baseline
+ * never uses — all uncovered — so they can never be covered and inflate LF.
+ * Because WHICH lines appear depends on the (varying) --changed selection, the
+ * file false-drops non-deterministically. When unit covers ZERO lines of a file
+ * that e2e DOES cover, that unit attribution is pure noise: drop it so the file's
+ * coverage comes from e2e (+baseline) alone. Files with real unit coverage
+ * (LH>0) and files e2e does not cover (genuinely 0%) are kept untouched.
+ * @param {FileLines} unit
+ * @param {FileLines} e2eCombined  per-commit e2e ∪ full-run e2e baseline
+ * @returns {FileLines}
+ */
+export function scrubIncidentalUnit(unit, e2eCombined) {
+  /** @type {FileLines} */
+  const out = new Map();
+  for (const [sf, lines] of unit) {
+    const unitCovers = [...lines.values()].some((h) => h > 0);
+    if (!unitCovers) {
+      const e = e2eCombined.get(sf);
+      if (e && [...e.values()].some((h) => h > 0)) continue; // incidental → drop
+    }
+    out.set(sf, new Map(lines));
+  }
+  return out;
+}
+
+/**
  * Carry forward a full-run e2e baseline onto the fresh per-commit union WITHOUT
  * inflating the denominator.
  *
