@@ -185,9 +185,29 @@ test("checkOne: baseline + cur within tolerance → pass", () => {
   );
 });
 
-test("checkOne: baseline + cur outside tolerance → fail", () => {
-  // baseline 60%, current 59% drops by 1pp > 0.5pp tolerance → fail
-  const r = checkOne("src/a.ts", 0.6, { linesFound: 100, linesHit: 59 }, OPTS);
+test("checkOne: baseline + cur outside BOTH tolerances → fail", () => {
+  // baseline 60% (600/1000), current 590/1000: 1pp > 0.5pp AND 10-line drop > 5 → fail
+  const r = checkOne("src/a.ts", 0.6, { linesFound: 1000, linesHit: 590 }, OPTS);
+  assert.match(r.reason, /coverage dropped/);
+});
+
+test("checkOne: small absolute-line drop passes even when pct drop exceeds tolerance", () => {
+  // e2e-dominated noise: baseline 46.72% (~64/137), current 62/137 = 45.26%.
+  // pct drop 1.46pp > 0.5pp, BUT only a 2-line drop ≤ 5 → pass (e2e noise floor).
+  assert.equal(
+    checkOne("src/POISheet.tsx", 0.4672, { linesFound: 137, linesHit: 62 }, OPTS),
+    null,
+  );
+  // FilterSpecEditor: baseline 30% (~12.3/41), current 12/41 = 29.27% → <1-line drop → pass.
+  assert.equal(
+    checkOne("src/FilterSpecEditor.tsx", 0.3, { linesFound: 41, linesHit: 12 }, OPTS),
+    null,
+  );
+});
+
+test("checkOne: a large absolute-line drop still fails even on a low-coverage file", () => {
+  // baseline 50% (250/500), current 200/500 = 40%: 10pp AND 50-line drop > 5 → fail
+  const r = checkOne("src/big.tsx", 0.5, { linesFound: 500, linesHit: 200 }, OPTS);
   assert.match(r.reason, /coverage dropped/);
 });
 
@@ -215,8 +235,8 @@ test("checkOne: waiver does not rescue a file absent from lcov", () => {
 });
 
 test("checkOne: default opts (no waiver) preserve strict no-regression", () => {
-  // regressionWaiver defaults to 1 (off) → a 100%→95% drop still fails
-  const r = checkOne("src/a.ts", 1.0, { linesFound: 100, linesHit: 95 }, OPTS);
+  // regressionWaiver defaults to 1 (off) → a 100%→90% drop (100 lines > 5) still fails
+  const r = checkOne("src/a.ts", 1.0, { linesFound: 1000, linesHit: 900 }, OPTS);
   assert.match(r.reason, /coverage dropped/);
 });
 

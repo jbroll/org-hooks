@@ -68,6 +68,7 @@ let baselinePath = process.env.COVERAGE_BASELINE ?? "coverage-baseline.json";
 let floor = Number(process.env.COVERAGE_FLOOR ?? "0.75");
 let tolerance = Number(process.env.COVERAGE_TOLERANCE ?? "0.005");
 let regressionWaiver = Number(process.env.COVERAGE_REGRESSION_WAIVER ?? "0.90");
+let lineTolerance = Number(process.env.COVERAGE_LINE_TOLERANCE ?? "5");
 let srcRoot = "src";
 let seedMode = false;
 let reseedMode = false;
@@ -81,6 +82,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (arg === "--floor") floor = Number(process.argv[++i]);
   else if (arg === "--tolerance") tolerance = Number(process.argv[++i]);
   else if (arg === "--regression-waiver") regressionWaiver = Number(process.argv[++i]);
+  else if (arg === "--line-tolerance") lineTolerance = Number(process.argv[++i]);
   else if (arg === "--src-root") srcRoot = process.argv[++i];
   else if (arg === "--seed") seedMode = true;
   else if (arg === "--reseed") reseedMode = true;
@@ -177,7 +179,12 @@ if (seedMode || !baselineExists) {
 /** @type {{ file: string; reason: string }[]} */
 const failures = [];
 for (const file of stagedFiles) {
-  const fail = checkOne(file, baseline[file], lcov[file], { floor, tolerance, regressionWaiver });
+  const fail = checkOne(file, baseline[file], lcov[file], {
+    floor,
+    tolerance,
+    regressionWaiver,
+    lineTolerance,
+  });
   if (fail) failures.push(fail);
 }
 
