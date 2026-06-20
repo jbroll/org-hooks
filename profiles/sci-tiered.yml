@@ -105,7 +105,7 @@ pre-commit:
             run: node "${ORG_HOOKS}/scripts/check-no-reexports.mjs" src
           - name: ts-jazz-waist
             glob: "*.{ts,tsx,js,jsx,mjs}"
-            run: node "${ORG_HOOKS}/scripts/check-jazz-value-import-ban.mjs" src
+            run: node "${ORG_HOOKS}/scripts/check-jazz-value-import-ban.mjs" src backend/src
           - name: ts-size-cap
             glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
             run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'

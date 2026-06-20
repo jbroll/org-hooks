@@ -12,7 +12,9 @@
 // Exempt files: src/jazz/**, src/schema/**, src/test/**, *.{test,spec}.*, *.d.ts,
 //   and `.jazz-waist-allow` entries (the React providers that mount JazzProvider).
 //
-// Usage:  node check-jazz-value-import-ban.mjs [srcDir=src]
+// Usage:  node check-jazz-value-import-ban.mjs [dir...]   (defaults to "src";
+//   pass e.g. `src backend/src` to put a backend tree under waist control too —
+//   missing dirs are skipped, so it is a no-op for repos without that tree).
 // Allowlist: `.jazz-waist-allow` (one path-substring per line, '#' comments).
 //   Meant to stay EMPTY for app code — the documented escape valve only.
 // Zero deps (node builtins only); mirrors check-no-reexports.mjs.
@@ -20,7 +22,8 @@
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join, extname } from "node:path";
 
-const root = process.argv[2] || "src";
+const roots = process.argv.slice(2);
+if (roots.length === 0) roots.push("src");
 
 const allow = [];
 if (existsSync(".jazz-waist-allow")) {
@@ -78,7 +81,7 @@ function hasValueBinding(clause) {
 }
 
 let failed = 0;
-for (const file of walk(root)) {
+for (const file of roots.flatMap((r) => walk(r))) {
   if (isExempt(file)) continue;
   const src = readFileSync(file, "utf8");
   let m;
