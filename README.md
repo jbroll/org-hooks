@@ -28,6 +28,30 @@ here.
 | `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e (flat `commands:` style); syncs lcov from CI host; runs coverage ratchet inline after sync |
 | `profiles/sci-tiered.yml` | pre-commit, pre-merge-commit | **self-contained** tiered fail-fast gate — ALL checks inlined (12 static + 2 GPU); pull ONLY this file with ZERO consumer pre-commit overrides |
 
+## Shared Biome config (`config/biome.base.json`)
+
+A repo onboarding `profiles/ts.yml` adds a `biome.json` that **extends** the
+shared base:
+
+```json
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
+  "extends": ["../org-hooks/config/biome.base.json"],
+  "files": { "includes": ["**", "!examples", "!**/build_dev"] }
+}
+```
+
+> **DO NOT INLINE.** Never copy the base's formatter/linter rules into a repo's
+> own `biome.json`. Always `extends` the shared base so a rule change here rolls
+> out to every repo. Inlining forks the org standard and silently drifts. The
+> only repo-local keys allowed are `extends`, `$schema`, and narrow `files`/
+> per-repo overrides — not a reimplementation of the base rules.
+>
+> Biome parses an `extends` target as **strict JSON**: no comments, no `//`
+> keys, and the `$schema` must match the installed Biome major/minor. Always
+> track the **latest** Biome — bump this base's `$schema` when Biome updates;
+> never pin consumers to an old Biome to accommodate a stale base.
+
 ## Tiered fail-fast gate (`profiles/sci-tiered.yml`)
 
 A repo that wants a two-tier, fail-fast pre-commit dispatches static checks
