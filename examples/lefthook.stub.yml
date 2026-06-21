@@ -42,7 +42,9 @@ remotes:
 
 # Sources lefthook-rc.sh before every hook — sets ORG_HOOKS and any other
 # machine-local env vars needed by org-hooks scripts.
-rc: lefthook-rc.sh
+# The ./ prefix is required: the generated hook runs under POSIX sh (dash on
+# many distros), where `. lefthook-rc.sh` searches PATH (not cwd) and fails.
+rc: ./lefthook-rc.sh
 
 # ── Overrides ───────────────────────────────────────────────────────────────
 #
