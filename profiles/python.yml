@@ -1,39 +1,83 @@
 # Python language pack.
 # A repo opts in with:  extends: [profiles/python.yml]
 #
+# Mirrors profiles/ts.yml: ALL static-analysis checks run pre-commit (parallel)
+# so breakage is caught immediately. There is NO pre-push section — a repo that
+# wants a push safety net adds one in its own lefthook.yml.
+#
 # ruff is host-installed (format + lint + import-sort + security S-rules,
-# replaces black/isort/flake8/pyupgrade/bandit). mypy/vulture/deptry are
-# run via `uv tool run` so no repo-level install is required; a repo may
-# instead pin them in its own dev extras and drop the `uv tool run`.
+# replacing black/isort/flake8/pyupgrade/bandit). mypy / vulture / deptry /
+# import-linter run via `uv tool run` so no repo-level install is required; a
+# repo may instead pin them in its own dev extras and drop the `uv tool run`.
+#
+# Per-tool config is repo-local: every tool reads its settings from the repo's
+# pyproject.toml ([tool.ruff], [tool.mypy], [tool.vulture], …). org-hooks
+# supplies only the invocation + glob gate, so each repo controls strictness —
+# the same contract as the TS pack delegating to repo npm scripts.
+#
+# Glob-gated like the TS pack: a commit with no .py (or no dep manifest change,
+# for py-deps) skips that command — no mypy/vulture/deptry cost on unrelated
+# commits. mypy/vulture/deptry scan the project (`.`), not just the staged
+# files, because they need whole-module context (mirrors tsc/knip).
 #
 # 2026 notes: stay on mypy for gating prod code (ty still beta, pyrefly
-# greenfield-only). deptry = unused/missing deps. import-linter for
-# architecture/cycle contracts when a repo defines .importlinter.
+# greenfield-only). deptry = unused/missing deps. import-linter enforces
+# architecture / no-cycle contracts (the dpdm analog) and runs ONLY when the
+# repo defines a contract (.importlinter or [tool.importlinter]); otherwise it
+# is a no-op, so zero cost for repos that don't use it.
 
 pre-commit:
-  commands:
-    py-format:
-      glob: "*.py"
-      run: ruff format --check {staged_files}
-    py-lint:
-      glob: "*.py"
-      run: ruff check {staged_files}
-
-pre-push:
   parallel: true
   commands:
-    # Scoped like the TS pack: a push with no .py (or no dep manifest
-    # change, for py-deps) skips the command entirely — no mypy/vulture/
-    # deptry cost on unrelated pushes.
+    py-format-lint:
+      glob: "*.py"
+      # Auto-fix (safe lint fixes + format) and re-stage, so a formatting-only
+      # diff self-heals at commit time instead of bouncing the author/agent for
+      # a manual reformat + recommit. `ruff check --fix` applies only SAFE fixes;
+      # anything needing --unsafe-fixes still surfaces as an error and blocks.
+      #
+      # CAVEAT (parallel: true): this WRITES while the read-only checks
+      # (py-typecheck/py-deadcode/...) read the same tree. ruff only rewrites
+      # files that actually need it, so the common case (already-clean staged
+      # files) writes nothing and cannot race; in the rare reformat case a
+      # concurrent reader could see a mid-write file and fail THIS commit — a
+      # retry then passes. Same tradeoff documented in profiles/ts.yml.
+      run: >-
+        ruff check --fix --no-cache {staged_files}
+        && ruff format {staged_files}
+      stage_fixed: true
     py-typecheck:
+      # Whole-project type check (mypy needs cross-module context), glob-gated
+      # so it only runs when a .py is staged — mirrors `npm run type-check`.
+      # Configure strictness in [tool.mypy] in the repo's pyproject.toml.
       glob: "*.py"
       run: uv tool run mypy .
     py-deadcode:
       glob: "*.py"
       run: uv tool run vulture . --min-confidence 80
     py-deps:
+      # Unused / missing / misplaced dependencies. Gated on .py AND manifests
+      # so a pure-manifest edit (adding a dep) is checked too.
       glob: "*.{py,toml,txt}"
       run: uv tool run deptry .
-    py-size-cap:
+    py-circular:
+      # Architecture / no-cycle contracts (the dpdm analog). Runs ONLY when the
+      # repo defines a contract; otherwise skips with no error. import-linter
+      # reads contracts from .importlinter or [tool.importlinter] in pyproject.
       glob: "*.py"
-      run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {push_files}'
+      run: |
+        if [ -f .importlinter ] || grep -qs '^\[tool\.importlinter' pyproject.toml; then
+          uv tool run --from import-linter lint-imports
+        else
+          echo "py-circular: no import-linter contract (.importlinter / [tool.importlinter]); skipping"
+        fi
+    py-size-cap:
+      # Per-file line cap on production source (hygiene.sh exempts tests and
+      # only caps src/bin/lib paths). Shared with the TS pack.
+      glob: "*.py"
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'
+    py-test-size-cap:
+      # Per-file line cap on pytest modules. Glob is broad (*.py); the script
+      # selects test_*.py / *_test.py / conftest.py and skips everything else.
+      glob: "*.py"
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" test-size-cap {staged_files}'

@@ -79,7 +79,11 @@ case "$cmd" in
     cap="${TEST_SIZE_CAP:-800}"
     for f in "$@"; do
       [ -f "$f" ] || continue
-      case "$f" in *.test.ts|*.test.tsx|*.test.js|*.test.jsx|*.spec.ts|*.spec.tsx) ;; *) continue;; esac
+      case "$f" in
+        *.test.ts|*.test.tsx|*.test.js|*.test.jsx|*.spec.ts|*.spec.tsx) ;;
+        test_*.py|*/test_*.py|*_test.py|conftest.py|*/conftest.py) ;;  # pytest layout
+        *) continue;;
+      esac
       n=$(wc -l <"$f" | tr -d ' ')
       if [ "$n" -gt "$cap" ]; then
         echo "  $f: $n lines (cap $cap) — split into smaller files"
