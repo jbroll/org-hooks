@@ -3,19 +3,24 @@
 # dispatch test jobs to a simple-ci GPU worker.
 #
 # Convention:
-#   sci binary:  /home/john/src/simple-ci/sci  (override in lefthook-local.yml)
-#   job names:   <worktree-basename>/ci/test
-#                <worktree-basename>/ci/e2e-smoke
+#   sci binary:  /home/john/src/simple-ci/sci  (override: SCI_BIN in the rc: env)
+#   job names:   <repo-dirname>/ci/test , <repo-dirname>/ci/e2e
+#                (worktree-aware: derived from the git COMMON dir; override SCI_WT)
 #   fallbacks:   npm run test:coverage  /  npm run test:e2e
 #
-# Coverage ratchet: runs inline here — AFTER lcov is retrieved from the CI
-# host — so it always checks fresh data from this exact commit.
+# The dispatch core (SCI/WT resolution, ci/before-test-push, trap-kill on
+# interrupt, wait, lcov retrieval from the CI host) is scripts/sci-run.sh; the
+# staged-file ratchet filtering is scripts/ratchet-staged.sh. Keep dispatch
+# changes THERE — this profile is composition only.
+#
+# Coverage ratchet: runs inline here — AFTER sci-run.sh has retrieved fresh
+# lcov from the CI host — so it always checks data from this exact commit.
 # A separate lefthook command would race the test job (no command-level ordering
 # survives parallel: true), so ordering is enforced by the shell instead.
 #
-# Ratchet staged-file filtering uses git diff --cached with sensible defaults:
+# Ratchet staged-file filtering defaults (see ratchet-staged.sh):
 #   glob:    ^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$
-#   exclude: src/test/, *.test.*, *.spec.*
+#   exclude: src/test/, __tests__/, *.test.*, *.spec.*
 # Per-project additional excludes — one path per line, # comments ignored:
 #   coverage-ratchet-exclude     — for unit ratchet
 #   coverage-e2e-ratchet-exclude — for E2E ratchet
@@ -27,89 +32,23 @@ pre-commit:
     unit-tests:
       glob: "**/*.{ts,tsx,js,jsx,json,css,html}"
       run: |
-        SCI=/home/john/src/simple-ci/sci
-        WT=${SCI_WT:-$(basename "$(git rev-parse --show-toplevel)")}
-        if test -x "$SCI"; then
-          # Let the repo prepare per-commit inputs (e.g. a changed-files manifest
-          # to scope the test run) before the job is rsynced to the CI worktree.
-          [ -x ci/before-test-push ] && ci/before-test-push
-          job=$("$SCI" push "${WT}/ci/test") || exit 1
-          echo "  unit queued ($job)"
-          # If the commit is interrupted, kill the remote job immediately rather
-          # than leaving it to run (and a later push to supersede it).
-          trap '"$SCI" kill "$job" >/dev/null 2>&1 || true' INT TERM
-          "$SCI" wait "$job"; rc=$?
-          trap - INT TERM
-          # Retrieve fresh lcov from the CI host before running the ratchet.
-          # The ratchet must run here — after this sync — to check current coverage.
-          LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
-          if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
-            worktree=$("$SCI" path "$job" 2>/dev/null)
-            if [ -n "$worktree" ]; then
-              mkdir -p "$(dirname "$LCOV")"
-              scp -q "$ci_host:$worktree/$LCOV" "$LCOV" 2>/dev/null || true
-            fi
-          fi
-          # Run coverage ratchet inline against the just-retrieved lcov.
-          BASELINE=${COVERAGE_BASELINE:-coverage-baseline.json}
-          if [ -f "$BASELINE" ] && [ -f "$LCOV" ] && [ -n "${ORG_HOOKS:-}" ]; then
-            staged=$(git diff --cached --name-only --diff-filter=ACMR \
-              | grep -E '^src/.*\.(ts|tsx|js|jsx|mjs|cjs)$' \
-              | grep -Ev '(^src/test/|\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$)')
-            if [ -f "coverage-ratchet-exclude" ]; then
-              _excl=$(mktemp)
-              grep -v '^#' coverage-ratchet-exclude | grep -v '^[[:space:]]*$' > "$_excl"
-              staged=$(printf '%s\n' "$staged" | grep -vFf "$_excl")
-              rm -f "$_excl"
-            fi
-            if [ -n "$staged" ]; then
-              node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
-                --lcov "$LCOV" --baseline "$BASELINE" $staged || exit 1
-            fi
-          fi
-          exit $rc
-        else
-          npm run test:coverage
-        fi
+        LCOV=${COVERAGE_LCOV:-coverage/lcov.info}
+        rc=0
+        "${ORG_HOOKS}/scripts/sci-run.sh" --label unit --before ci/before-test-push \
+          --lcov "$LCOV" --fallback "npm run test:coverage" ci/test || rc=$?
+        "${ORG_HOOKS}/scripts/ratchet-staged.sh" --lcov "$LCOV" \
+          --baseline "${COVERAGE_BASELINE:-coverage-baseline.json}" \
+          --exclude-file coverage-ratchet-exclude || exit 1
+        exit $rc
     e2e-tests:
       glob: "**/*.{ts,tsx,js,jsx,json,css,html}"
       run: |
-        SCI=/home/john/src/simple-ci/sci
-        WT=${SCI_WT:-$(basename "$(git rev-parse --show-toplevel)")}
-        if test -x "$SCI"; then
-          job=$("$SCI" push "${WT}/ci/e2e") || exit 1
-          echo "  e2e  queued ($job)"
-          # If the commit is interrupted, kill the remote job immediately.
-          trap '"$SCI" kill "$job" >/dev/null 2>&1 || true' INT TERM
-          "$SCI" wait "$job"; rc=$?
-          trap - INT TERM
-          # Retrieve fresh E2E lcov from the CI host before running the ratchet.
-          E2E_LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
-          if ci_host=$("$SCI" host 2>/dev/null) && [ -n "$ci_host" ]; then
-            worktree=$("$SCI" path "$job" 2>/dev/null)
-            if [ -n "$worktree" ]; then
-              mkdir -p "$(dirname "$E2E_LCOV")"
-              scp -q "$ci_host:$worktree/$E2E_LCOV" "$E2E_LCOV" 2>/dev/null || true
-            fi
-          fi
-          # Run E2E coverage ratchet inline against the just-retrieved lcov.
-          E2E_BASELINE=${COVERAGE_E2E_BASELINE:-coverage-e2e-baseline.json}
-          if [ -f "$E2E_BASELINE" ] && [ -f "$E2E_LCOV" ] && [ -n "${ORG_HOOKS:-}" ]; then
-            staged=$(git diff --cached --name-only --diff-filter=ACMR \
-              | grep -E '^src/.*\.(ts|tsx)$' \
-              | grep -Ev '(^src/test/|\.(test|spec)\.(ts|tsx)$)')
-            if [ -f "coverage-e2e-ratchet-exclude" ]; then
-              _excl=$(mktemp)
-              grep -v '^#' coverage-e2e-ratchet-exclude | grep -v '^[[:space:]]*$' > "$_excl"
-              staged=$(printf '%s\n' "$staged" | grep -vFf "$_excl")
-              rm -f "$_excl"
-            fi
-            if [ -n "$staged" ]; then
-              node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
-                --lcov "$E2E_LCOV" --baseline "$E2E_BASELINE" $staged || exit 1
-            fi
-          fi
-          exit $rc
-        else
-          npm run test:e2e
-        fi
+        E2E_LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
+        rc=0
+        "${ORG_HOOKS}/scripts/sci-run.sh" --label e2e \
+          --lcov "$E2E_LCOV" --fallback "npm run test:e2e" ci/e2e || rc=$?
+        "${ORG_HOOKS}/scripts/ratchet-staged.sh" --lcov "$E2E_LCOV" \
+          --baseline "${COVERAGE_E2E_BASELINE:-coverage-e2e-baseline.json}" \
+          --exclude-file coverage-e2e-ratchet-exclude \
+          --glob '^src/.*\.(ts|tsx)$' || exit 1
+        exit $rc

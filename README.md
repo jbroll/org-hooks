@@ -25,7 +25,7 @@ here.
 | `profiles/ts.yml` | adds to pre-commit | Biome (staged) · tsc · knip · dpdm · duplicate-type scan · no-reexports · size-cap |
 | `profiles/python.yml` | adds to pre-commit | ruff format+lint+autofix (staged, re-staged) · mypy · vulture · deptry · import-linter (only if a contract exists) · size-cap · test-size-cap — all at commit, parallel, glob-gated (mirrors `ts.yml`; no pre-push) |
 | `profiles/specs.yml` | pre-commit/post-commit | AI-Roller `air check` / artifact-drift (ai-roller only) |
-| `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e (flat `commands:` style); syncs lcov from CI host; runs coverage ratchet inline after sync |
+| `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e (flat `commands:` style) — composes `scripts/sci-run.sh` (dispatch + lcov sync) and `scripts/ratchet-staged.sh` (inline coverage ratchet) |
 | `profiles/sci-tiered.yml` | pre-commit, pre-merge-commit | **self-contained** tiered fail-fast gate — ALL checks inlined (12 static + 2 GPU); pull ONLY this file with ZERO consumer pre-commit overrides |
 
 ## Shared Biome config (`config/biome.base.json`)
@@ -97,12 +97,17 @@ parent of the shared `.git`. From any worktree (e.g. `repo-wt1`) this resolves t
 the main repo dir (`repo`), so a worktree never pushes to a stray queue.
 
 Heavy tests/coverage/e2e are dispatched to the remote GPU queue via `profiles/sci.yml`.
-The coverage ratchet is inlined at the end of each sci command — after the lcov is
-retrieved from the CI host — so it always checks coverage from the current commit.
+The dispatch core (SCI/WT resolution, `ci/before-test-push`, trap-kill on interrupt,
+wait, lcov retrieval) is the shared `scripts/sci-run.sh` — also usable directly for
+repo-local gates, e.g. a pre-push `"${ORG_HOOKS}/scripts/sci-run.sh" --label full-gate test`.
+The coverage ratchet runs at the end of each sci command — after `sci-run.sh` has
+retrieved the lcov from the CI host — so it always checks coverage from the current
+commit; the staged-file filtering lives in the shared `scripts/ratchet-staged.sh`.
 
 ## Coverage ratchet
 
-The ratchet lives inside `profiles/sci.yml`, not in a separate lefthook command. This
+The ratchet is invoked from `profiles/sci.yml` (via `scripts/ratchet-staged.sh`),
+not as a separate lefthook command. This
 is intentional: lefthook v2 has no command-level ordering that survives `parallel: true`,
 so a separate command would race the test job and check stale lcov.
 By inlining the ratchet after the `scp` sync, ordering is enforced by the shell.
@@ -114,9 +119,10 @@ Two independent ratchets, one per sci command:
 | `unit-tests` | `coverage-baseline.json` | `coverage/lcov.info` |
 | `e2e-tests` | `coverage-e2e-baseline.json` | `coverage/e2e/lcov.info` |
 
-Each ratchet auto-seeds on first run — if the baseline file does not exist, the
-first invocation writes it from current lcov and exits 0. Subsequent commits
-then have something to ratchet against.
+A repo with no committed baseline file is not gated: the hook-side wrapper
+(`ratchet-staged.sh`) exits 0 when the baseline or lcov is missing. Seeding a
+baseline is a deliberate act — run `coverage-ratchet.mjs --seed` (below); from
+then on every commit ratchets against it.
 
 **Baseline format (v2)** — one percentage per file, with sorted keys for clean
 diffs:
@@ -143,14 +149,14 @@ On fail the commit is aborted with a per-file reason.
 Duplicate keys after path normalisation (e.g. stale `localhost-NNNN/src/...`
 entries alongside `src/...`) collapse to the max on read.
 
-**Staged-file filter** (applied by sci.yml via `git diff --cached`):
+**Staged-file filter** (applied by `scripts/ratchet-staged.sh` via `git diff --cached`):
 
 | ratchet | glob |
 |---|---|
 | unit | `^src/.*\.(ts\|tsx\|js\|jsx\|mjs\|cjs)$` |
 | e2e | `^src/.*\.(ts\|tsx)$` |
 
-Both exclude `src/test/`, `*.test.*`, `*.spec.*`.
+Both exclude `src/test/`, `__tests__/`, `*.test.*`, `*.spec.*`.
 Per-repo additional excludes: create `coverage-ratchet-exclude` / `coverage-e2e-ratchet-exclude` in the repo root — one path per line, `#` comments supported.
 
 Example `coverage-e2e-ratchet-exclude`:
@@ -165,7 +171,8 @@ src/components/MapView/hooks/useGpsSnap.ts
 
 **Tests**: pure helpers live in `scripts/coverage-ratchet-lib.mjs`; run the
 suite with `node --test scripts/coverage-ratchet.test.mjs` (uses node:test,
-no external deps).
+no external deps). The dispatch core and staged-filter wrapper have their own
+subprocess suites: `node --test scripts/sci-run.test.mjs scripts/ratchet-staged.test.mjs`.
 
 **Reseeding the baseline** — two modes for a full rebuild:
 

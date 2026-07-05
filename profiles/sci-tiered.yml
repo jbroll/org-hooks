@@ -224,21 +224,10 @@ pre-commit:
                     ${E2E_BASELINE_SHA:+--e2e-baseline-sha "$E2E_BASELINE_SHA"} \
                     --out "$UNION_LCOV" --src-root src || exit 1
                 fi
-                if [ -f "$UNION_BASELINE" ] && [ -f "$UNION_LCOV" ] && [ -n "${ORG_HOOKS:-}" ]; then
-                  staged=$(git diff --cached --name-only --diff-filter=ACMR \
-                    | grep -E '^(src|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs)$' \
-                    | grep -Ev '(^src/test/|/__tests__/|\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$)')
-                  if [ -f "coverage-union-ratchet-exclude" ]; then
-                    _excl=$(mktemp)
-                    grep -v '^#' coverage-union-ratchet-exclude | grep -v '^[[:space:]]*$' > "$_excl"
-                    staged=$(printf '%s\n' "$staged" | grep -vFf "$_excl")
-                    rm -f "$_excl"
-                  fi
-                  if [ -n "$staged" ]; then
-                    node "${ORG_HOOKS}/scripts/coverage-ratchet.mjs" \
-                      --lcov "$UNION_LCOV" --baseline "$UNION_BASELINE" $staged || exit 1
-                  fi
-                fi
+                "${ORG_HOOKS}/scripts/ratchet-staged.sh" --lcov "$UNION_LCOV" \
+                  --baseline "$UNION_BASELINE" \
+                  --exclude-file coverage-union-ratchet-exclude \
+                  --glob '^(src|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs)$' || exit 1
                 exit 0
               else
                 npm run test:coverage && npm run test:e2e
