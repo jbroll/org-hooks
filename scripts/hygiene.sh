@@ -50,8 +50,10 @@ case "$cmd" in
     # coverage and are exempt). Default 500; override SIZE_CAP. An
     # allowlisted file (one path-substring per line in .size-cap-allow,
     # '#' comments) is exempt — fail-on-new / grandfather pattern.
+    # Covers flat layouts (src/, bin/, lib/) and common monorepo layouts
+    # (packages/<pkg>/src/, apps/<app>/src/, services/<svc>/src/, etc.).
     cap="${SIZE_CAP:-500}"
-    prod='^(src|bin|lib)/.*\.(ts|tsx|js|jsx|mjs|cjs|py)$'
+    prod='^((src|bin|lib)/|(packages|apps|services|clients|servers)/[^/]+/(src|bin|lib)/).*\.(ts|tsx|js|jsx|mjs|cjs|py)$'
     allow_file=".size-cap-allow"
     is_allowed() {
       [ -f "$allow_file" ] || return 1
