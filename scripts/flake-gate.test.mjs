@@ -106,3 +106,52 @@ describe("flake-gate main()", () => {
     assert.ok(existsSync(expected), `expected firehose at ${expected}`);
   });
 });
+
+describe("flake-gate normalized format", () => {
+  const orig = { ...process.env };
+  const tmps = [];
+  afterEach(() => {
+    for (const k of ["CI_FLAKE_FILE", "CI_REPO", "FLAKE_FORMAT", "FLAKE_RECORDS"]) {
+      if (orig[k] === undefined) delete process.env[k];
+      else process.env[k] = orig[k];
+    }
+    for (const p of tmps.splice(0)) rmSync(p, { recursive: true, force: true });
+  });
+
+  it("appends normalized records to the firehose and exits 0 on a clean run", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "flake-norm-"));
+    tmps.push(dir);
+    const records = path.join(dir, "records.jsonl");
+    const firehose = path.join(dir, "unit-flake.jsonl");
+    writeFileSync(
+      records,
+      JSON.stringify({ testId: "src/a.test.ts › does x › unit-frontend", project: "unit-frontend", status: "passed" }) + "\n",
+    );
+    process.env.FLAKE_FORMAT = "normalized";
+    process.env.FLAKE_RECORDS = records;
+    process.env.CI_FLAKE_FILE = firehose;
+    delete process.env.CI_REPO;
+
+    const code = main();
+
+    assert.equal(code, 0);
+    const lines = readFileSync(firehose, "utf-8").trim().split("\n");
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /"testId":"src\/a\.test\.ts › does x › unit-frontend"/);
+    assert.match(lines[0], /"status":"passed"/);
+  });
+
+  it("skips corrupt record lines (fail-open)", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "flake-norm-"));
+    tmps.push(dir);
+    const records = path.join(dir, "records.jsonl");
+    const firehose = path.join(dir, "unit-flake.jsonl");
+    writeFileSync(records, "{not json}\n" + JSON.stringify({ testId: "t", project: "p", status: "passed" }) + "\n");
+    process.env.FLAKE_FORMAT = "normalized";
+    process.env.FLAKE_RECORDS = records;
+    process.env.CI_FLAKE_FILE = firehose;
+    const code = main();
+    assert.equal(code, 0);
+    assert.equal(readFileSync(firehose, "utf-8").trim().split("\n").length, 1);
+  });
+});

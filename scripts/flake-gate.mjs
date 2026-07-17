@@ -6,11 +6,29 @@
 // error logs a warning and exits 0 — this runs on every commit and must never
 // wedge CI through its own bugs. A genuine Playwright failure is surfaced
 // separately by ci/e2e via Playwright's own exit code.
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import path, { dirname } from "node:path";
 import { computeTrips, parseResults } from "./flake-gate-lib.mjs";
 
 const WINDOW = 10;
+
+/** Read a normalized-records JSONL into [{ testId, project, status }]. Skips corrupt lines. */
+function readNormalized(recordsPath) {
+  if (!recordsPath || !existsSync(recordsPath)) return [];
+  const out = [];
+  for (const line of readFileSync(recordsPath, "utf-8").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const rec = JSON.parse(line);
+      if (rec.testId && rec.status) {
+        out.push({ testId: rec.testId, project: rec.project ?? "", status: rec.status });
+      }
+    } catch {
+      // skip a partially-written / malformed line
+    }
+  }
+  return out;
+}
 
 export function main() {
   const reportPath = process.env.PLAYWRIGHT_JSON ?? "test-results/results.json";
@@ -22,8 +40,11 @@ export function main() {
     return 0;
   }
 
-  const report = JSON.parse(readFileSync(reportPath, "utf-8"));
-  const thisRun = parseResults(report);
+  const format = process.env.FLAKE_FORMAT ?? "playwright";
+  const thisRun =
+    format === "normalized"
+      ? readNormalized(process.env.FLAKE_RECORDS)
+      : parseResults(JSON.parse(readFileSync(reportPath, "utf-8")));
   if (thisRun.length === 0) {
     console.log("[flake-gate] no test results to record.");
     return 0;
