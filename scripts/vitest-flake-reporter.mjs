@@ -1,53 +1,36 @@
-// Vitest reporter that emits normalized flake records for org-hooks' flake gate.
+// Vitest 4 reporter that emits normalized flake records for org-hooks' flake gate.
 // Writes one {testId, project, status} JSON line per test to VITEST_FLAKE_OUT.
-// status: "flaky" when the test passed only after a retry (result.retryCount > 0),
-// "failed" when its final state is fail, else "passed". Skipped/todo are omitted.
+// status: "flaky" when the test passed only after a retry (diagnostic.retryCount > 0),
+// "failed" when its final state is failed, else "passed". Skipped/pending are omitted.
 //
-// Self-contained: the `files` task tree is handed to onFinished() by vitest at
-// runtime, so we walk it directly rather than importing @vitest/runner (which is
-// not a dependency of org-hooks and would break this reporter's own unit test).
+// Targets the Vitest 4 reporter API: onTestRunEnd(testModules) with the
+// TestModule / TestCase object model (module.relativeModuleId, case.fullName,
+// case.result().state, case.diagnostic().retryCount). Self-contained — vitest is
+// not an org-hooks dependency, so the reporter takes objects vitest hands it and
+// imports nothing from vitest.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-/** Depth-first collect every `type: "test"` task under a file/suite tree. */
-function collectTests(task, out) {
-  if (task.type === "test") {
-    out.push(task);
-    return;
-  }
-  for (const child of task.tasks ?? []) collectTests(child, out);
-}
-
-/** Full test name: file name › describe… › test title (walks the .suite chain). */
-function fullName(task) {
-  const names = [];
-  let t = task;
-  while (t) {
-    if (t.name) names.unshift(t.name);
-    t = t.suite;
-  }
-  return names.join(" › ");
-}
-
-function normalize(test) {
-  const r = test.result;
-  if (r?.state === "fail") return "failed";
-  if (r?.state === "pass") return (r.retryCount ?? 0) > 0 ? "flaky" : "passed";
-  return null; // skipped / todo / not-run
+/** Map a vitest test state + retry count to a normalized flake status (or null to skip). */
+export function classify(state, retryCount) {
+  if (state === "failed") return "failed";
+  if (state === "passed") return (retryCount ?? 0) > 0 ? "flaky" : "passed";
+  return null; // skipped / pending
 }
 
 export default class FlakeReporter {
-  onFinished(files = []) {
+  onTestRunEnd(testModules = []) {
     const out = process.env.VITEST_FLAKE_OUT;
     if (!out) return;
     const project = process.env.VITEST_PROJECT ?? "unit";
-    const tests = [];
-    for (const file of files) collectTests(file, tests);
     const lines = [];
-    for (const test of tests) {
-      const status = normalize(test);
-      if (!status) continue;
-      lines.push(JSON.stringify({ testId: `${fullName(test)} › ${project}`, project, status }));
+    for (const mod of testModules) {
+      for (const test of mod.children.allTests()) {
+        const status = classify(test.result().state, test.diagnostic()?.retryCount);
+        if (!status) continue;
+        const file = test.module.relativeModuleId;
+        lines.push(JSON.stringify({ testId: `${file} › ${test.fullName} › ${project}`, project, status }));
+      }
     }
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, lines.length ? lines.join("\n") + "\n" : "");
