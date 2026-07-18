@@ -1,0 +1,30 @@
+# detekt base config — copy to a repo as `detekt.yml` and tune.
+# Used via: detekt --build-upon-default-config --config detekt.yml
+# so this file only OVERRIDES the detekt defaults; unset rules keep their
+# default behavior. Formatting is left to ktlint (kt-format-lint), so the
+# detekt `formatting` ruleset stays off here to avoid double-reporting.
+
+build:
+  maxIssues: 0            # any finding fails the gate (repos may raise while adopting)
+
+# NOTE: formatting is owned by ktlint (kt-format-lint) — the detekt `formatting`
+# ruleset is intentionally NOT configured here (it also requires the detekt
+# formatting plugin, absent from the plain detekt-cli).
+
+complexity:
+  LongMethod:
+    active: true
+  TooManyFunctions:
+    active: false         # server route modules legitimately have many handlers
+
+style:
+  MagicNumber:
+    active: true
+    ignoreNumbers: ['-1', '0', '1', '2', '100']
+    excludes: ['**/test/**', '**/*Test.kt']
+  MaxLineLength:
+    active: false         # ktlint/.editorconfig owns line length
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: false         # bridge code catches broadly then re-maps to WireError

@@ -1,0 +1,70 @@
+# Kotlin language pack.
+# A repo opts in with:  extends: [profiles/kotlin.yml]
+#
+# Mirrors profiles/ts.yml and profiles/python.yml: ALL static-analysis checks
+# run pre-commit (parallel) so breakage is caught immediately. There is NO
+# pre-push section — a repo that wants a push safety net adds one in its own
+# lefthook.yml.
+#
+# COMPILE / TEST are NOT defined here. Kotlin compilation and unit tests need
+# Gradle (and, for Android, the SDK), which a fast local pre-commit hook cannot
+# run. They belong in the repo's committed lefthook.yml — and, exactly like the
+# TS pack dispatches coverage to a build host, an Android repo should dispatch
+# `./gradlew :core:test` / `:app:assembleDebug` to the machine that has the SDK.
+# This pack does lint / static-analysis / hygiene only — the parts that run on a
+# plain JDK with no Gradle.
+#
+# Host-installed standalone JVM tools (JDK 17+), the ruff-of-this-pack:
+#   ktlint  format + lint, reads the repo's .editorconfig
+#           https://github.com/pinterest/ktlint  (self-executable)
+#   detekt  AST static analysis, reads the repo's detekt.yml
+#           https://detekt.dev  (detekt-cli-<ver>-all.jar; wrap as `detekt`)
+# Provision once per host (mirrors ruff being host-installed):
+#   curl -sSLo /usr/local/bin/ktlint <release>/ktlint && chmod +x /usr/local/bin/ktlint
+#   java -jar detekt-cli-<ver>-all.jar …  (wrapper script named `detekt` on PATH)
+#
+# Per-tool config is repo-local: ktlint reads .editorconfig
+# ([*.{kt,kts}] ktlint_* keys); detekt reads detekt.yml (copy config/detekt.base.yml
+# to start). org-hooks supplies only the invocation + glob gate, so each repo
+# controls strictness — the same contract as the TS/Python packs.
+#
+# Java: the same shape with spotless/google-java-format + checkstyle belongs in a
+# separate profiles/java.yml pack; add it when a repo has *.java sources.
+
+pre-commit:
+  parallel: true
+  commands:
+    kt-format-lint:
+      glob: "*.{kt,kts}"
+      # Auto-fix (format + safe lint) and re-stage, so a style-only diff self-
+      # heals at commit instead of bouncing the author/agent for a manual
+      # reformat + recommit — mirrors biome --write / ruff --fix. ktlint --format
+      # rewrites fixable violations; anything unfixable still errors and blocks.
+      #
+      # CAVEAT (parallel: true): this WRITES while the read-only kt-static reads
+      # the same tree. ktlint only rewrites files that actually need it, so the
+      # common case (already-formatted staged files) writes nothing and cannot
+      # race; a rare reformat could make a concurrent reader fail THIS commit and
+      # a retry passes. Same tradeoff documented in profiles/ts.yml.
+      run: ktlint --format --relative {staged_files}
+      stage_fixed: true
+    kt-static:
+      # AST static analysis (the mypy/vulture analog). detekt needs source-set
+      # context, so it scans the tree (excluding build output), glob-gated to run
+      # only when a .kt is staged. --build-upon-default-config means the repo's
+      # detekt.yml only overrides defaults; with no detekt.yml it runs pure
+      # defaults, so the check is zero-config-safe.
+      glob: "*.{kt,kts}"
+      run: >-
+        detekt --build-upon-default-config --input .
+        --excludes "**/build/**,**/.gradle/**,**/generated/**"
+        $([ -f detekt.yml ] && printf -- "--config detekt.yml")
+    kt-size-cap:
+      # Per-file line cap on production source (hygiene.sh exempts tests and only
+      # caps src/main paths). Shared with the TS and Python packs.
+      glob: "*.{kt,kts}"
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'
+    kt-test-size-cap:
+      # Per-file line cap on Kotlin test sources (src/test/**, *Test.kt).
+      glob: "*Test.kt"
+      run: '"${ORG_HOOKS}/scripts/hygiene.sh" test-size-cap {staged_files}'

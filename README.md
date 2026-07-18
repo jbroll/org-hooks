@@ -24,6 +24,7 @@ here.
 | `lefthook-push.yml` | pre-push | language-agnostic push gates |
 | `profiles/ts.yml` | adds to pre-commit | Biome (staged) · tsc · knip · dpdm · duplicate-type scan · no-reexports · size-cap |
 | `profiles/python.yml` | adds to pre-commit | ruff format+lint+autofix (staged, re-staged) · mypy · vulture · deptry · import-linter (only if a contract exists) · size-cap · test-size-cap — all at commit, parallel, glob-gated (mirrors `ts.yml`; no pre-push) |
+| `profiles/kotlin.yml` | adds to pre-commit | ktlint format+lint+autofix (staged, re-staged) · detekt AST static analysis · size-cap · test-size-cap — all at commit, parallel, glob-gated (mirrors `ts.yml`/`python.yml`). Lint/static only — Gradle compile/test needs the SDK and belongs in the repo's own lefthook (dispatch to a build host). Java = a future `profiles/java.yml` (spotless/checkstyle), same shape. |
 | `profiles/specs.yml` | pre-commit/post-commit | AI-Roller `air check` / artifact-drift (ai-roller only) |
 | `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e (flat `commands:` style) — composes `scripts/sci-run.sh` (dispatch + lcov sync) and `scripts/ratchet-staged.sh` (inline coverage ratchet) |
 | `profiles/sci-tiered.yml` | pre-commit, pre-merge-commit | **self-contained** tiered fail-fast gate — ALL checks inlined (12 static + 2 GPU); pull ONLY this file with ZERO consumer pre-commit overrides |
@@ -203,6 +204,8 @@ node <ORG_HOOKS>/scripts/coverage-ratchet.mjs --seed \
 | gitleaks | secret scanning | release binary → `~/.local/bin` |
 | ruff | Python format+lint | (already present) `~/.local/bin` |
 | mypy | Python type check | `uv tool install mypy` |
+| ktlint | Kotlin format+lint | release binary → `/usr/local/bin/ktlint` (self-executable, needs JDK 17+) |
+| detekt | Kotlin static analysis | `detekt-cli-<ver>-all.jar` → wrap as `detekt` on PATH (`java -jar …`) |
 | typos | spell check (optional) | `cargo install typos-cli` |
 
 Per-repo JS tools (Biome/knip/dpdm/typescript) are pinned as repo
