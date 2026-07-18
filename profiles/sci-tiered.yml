@@ -112,6 +112,20 @@ pre-commit:
           - name: ts-test-size-cap
             glob: "*.{test,spec}.{ts,tsx,js,jsx}"
             run: '"${ORG_HOOKS}/scripts/hygiene.sh" test-size-cap {staged_files}'
+          # Kotlin format+lint+hygiene (glob-gated: inert in repos with no .kt).
+          # Host tools ktlint/detekt (JDK 17+); detekt is in tier1-static below.
+          # Mirrors profiles/kotlin.yml. Gradle compile/test needs the SDK → stays
+          # in the consumer lefthook / build-host dispatch, not here.
+          - name: kt-format-lint
+            glob: "*.{kt,kts}"
+            run: ktlint --format --relative {staged_files}
+            stage_fixed: true
+          - name: kt-size-cap
+            glob: "*.{kt,kts}"
+            run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'
+          - name: kt-test-size-cap
+            glob: "*Test.kt"
+            run: '"${ORG_HOOKS}/scripts/hygiene.sh" test-size-cap {staged_files}'
 
     # ── Tier 1b — SLOW static analysis, local, parallel. Runs only if Tier 1a
     #    passed; gates Tier 2. ─────────────────────────────────────────────────
@@ -133,6 +147,15 @@ pre-commit:
             run: >-
               npx --no-install dpdm --no-warning --no-tree
               --exit-code "${DPDM_CIRCULAR:-circular:1}" "src/**/*.{ts,tsx}"
+          # Kotlin AST static analysis (detekt). Glob-gated: inert with no .kt.
+          # --build-upon-default-config means a repo's optional detekt.yml only
+          # overrides defaults; with none it runs pure defaults (zero-config-safe).
+          - name: kt-static
+            glob: "*.{kt,kts}"
+            run: >-
+              detekt --build-upon-default-config --input .
+              --excludes "**/node_modules/**,**/dist/**,**/build/**,**/.gradle/**,**/generated/**"
+              $([ -f detekt.yml ] && printf -- "--config detekt.yml")
 
     # ── Tier 2 — expensive GPU dispatch. Runs ONLY if Tier 1 fully passed. ───
     - name: tier2-gpu
