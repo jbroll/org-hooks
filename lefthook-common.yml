@@ -20,8 +20,9 @@ pre-commit:
     eof-whitespace:
       run: '"${ORG_HOOKS}/scripts/hygiene.sh" eof-ws {staged_files}'
 
-# Linear-history guard. Authoritative enforcement is server-side
-# (GitHub Ruleset "require linear history"); this is fast local feedback.
+# Linear-history guard: protected branches update by fast-forward merge only
+# (no merge commits, no PRs). Fast-forward merges create no commit so they pass;
+# a merge commit on a protected branch is rejected.
 pre-merge-commit:
   commands:
     no-merge-on-protected:

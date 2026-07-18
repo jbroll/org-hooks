@@ -148,14 +148,18 @@ case "$cmd" in
     fi
     ;;
   no-merge-commit)
-    # Blocks `git merge` that would create a merge commit on a protected
-    # branch. Fast feedback only — GitHub Rulesets are authoritative.
+    # Protected branches update by FAST-FORWARD MERGE ONLY — no merge commits,
+    # no PRs. A fast-forward merge creates no commit, so it never trips this
+    # pre-merge-commit hook; the hook fires only when a merge WOULD create a
+    # merge commit on a protected branch, which is exactly what we reject.
     branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
     protected="${PROTECTED_BRANCHES:-main master}"
     for p in $protected; do
       if [ "$branch" = "$p" ]; then
-        echo "  merge commits are not allowed on '$branch' — rebase instead:"
-        echo "      git switch $branch && git rebase <branch>"
+        echo "  '$branch' is fast-forward-only. Rebase your feature branch onto"
+        echo "  '$branch', then fast-forward — do not create a merge commit:"
+        echo "      git switch <feature> && git rebase $branch"
+        echo "      git switch $branch && git merge --ff-only <feature>"
         exit 1
       fi
     done
