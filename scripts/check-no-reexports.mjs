@@ -14,15 +14,18 @@
 // Allowed: inline-declaration exports (`export function/const/class/
 //   interface/type/enum/default`).
 //
-// Usage:  node check-no-reexports.mjs [srcDir=src]
+// Usage:  node check-no-reexports.mjs [srcDir...]
+//   Default roots: src, packages/*/src. A root may contain one `*`
+//   segment. Non-existent roots are skipped.
 // Allowlist: `.no-reexports-allow` in repo root, one path-substring per
 // line ('#' comments) — e.g. an intentional public barrel `src/index.ts`.
 // Zero deps (node builtins only).
 
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join, extname } from "node:path";
+import { resolveRoots } from "./source-roots-lib.mjs";
 
-const root = process.argv[2] || "src";
+const roots = resolveRoots(process.argv.slice(2));
 
 const allow = [];
 if (existsSync(".no-reexports-allow")) {
@@ -52,7 +55,7 @@ const FROM = /^\s*export\s+(type\s+)?(\{[^}]*\}|\*)\s+from\s+['"]/;
 const BARE = /^\s*export\s+\{\s*\w[^}]*\}\s*;?\s*$/;
 
 let failed = 0;
-for (const file of walk(root)) {
+for (const file of roots.flatMap((r) => walk(r))) {
   if (allowed(file)) continue;
   const lines = readFileSync(file, "utf8").split("\n");
   lines.forEach((line, i) => {

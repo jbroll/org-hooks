@@ -7,15 +7,18 @@
 // off-the-shelf tool covers this in 2026, so this is a deliberate small
 // custom scanner (zero deps — node builtins only).
 //
-// Usage:  node check-duplicate-types.mjs [srcDir=src]
+// Usage:  node check-duplicate-types.mjs [srcDir...]
+//   Default roots: src, packages/*/src. A root may contain one `*`
+//   segment. Non-existent roots are skipped.
 // Allowlist: a `.dup-types-allow` file (one name per line, '#' comments)
 // in the repo root suppresses known pre-existing dupes — new ones fail.
 // Pattern mirrors rkr-blog's warn-on-existing / fail-on-new gate.
 
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join, extname } from "node:path";
+import { resolveRoots } from "./source-roots-lib.mjs";
 
-const root = process.argv[2] || "src";
+const roots = resolveRoots(process.argv.slice(2));
 
 function walk(dir, out = []) {
   if (!existsSync(dir)) return out;
@@ -49,7 +52,7 @@ if (existsSync(".dup-types-allow")) {
 }
 
 const seen = new Map(); // name -> [files]
-for (const file of walk(root)) {
+for (const file of roots.flatMap((r) => walk(r))) {
   const names = new Set();
   for (const line of readFileSync(file, "utf8").split("\n")) {
     const m = DECL.exec(line);

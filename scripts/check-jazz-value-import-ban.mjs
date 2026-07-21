@@ -21,9 +21,9 @@
 
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join, extname } from "node:path";
+import { resolveRoots } from "./source-roots-lib.mjs";
 
-const roots = process.argv.slice(2);
-if (roots.length === 0) roots.push("src");
+const roots = resolveRoots(process.argv.slice(2));
 
 const allow = [];
 if (existsSync(".jazz-waist-allow")) {

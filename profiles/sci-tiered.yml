@@ -99,13 +99,13 @@ pre-commit:
             stage_fixed: true
           - name: ts-dup-types
             glob: "*.{ts,tsx}"
-            run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src
+            run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src 'packages/*/src'
           - name: ts-no-reexports
             glob: "*.{ts,tsx,js,jsx,mjs}"
-            run: node "${ORG_HOOKS}/scripts/check-no-reexports.mjs" src
+            run: node "${ORG_HOOKS}/scripts/check-no-reexports.mjs" src 'packages/*/src'
           - name: ts-jazz-waist
             glob: "*.{ts,tsx,js,jsx,mjs}"
-            run: node "${ORG_HOOKS}/scripts/check-jazz-value-import-ban.mjs" src backend/src
+            run: node "${ORG_HOOKS}/scripts/check-jazz-value-import-ban.mjs" src backend/src 'packages/*/src'
           - name: ts-size-cap
             glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
             run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'

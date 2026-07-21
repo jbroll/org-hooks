@@ -56,13 +56,13 @@ pre-commit:
         --exit-code circular:1 "src/**/*.{ts,tsx}"
     ts-dup-types:
       glob: "*.{ts,tsx}"
-      run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src
+      run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src 'packages/*/src'
     ts-no-reexports:
       glob: "*.{ts,tsx,js,jsx,mjs}"
-      run: node "${ORG_HOOKS}/scripts/check-no-reexports.mjs" src
+      run: node "${ORG_HOOKS}/scripts/check-no-reexports.mjs" src 'packages/*/src'
     ts-jazz-waist:
       glob: "*.{ts,tsx,js,jsx,mjs}"
-      run: node "${ORG_HOOKS}/scripts/check-jazz-value-import-ban.mjs" src backend/src
+      run: node "${ORG_HOOKS}/scripts/check-jazz-value-import-ban.mjs" src backend/src 'packages/*/src'
     ts-size-cap:
       glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
       run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'
