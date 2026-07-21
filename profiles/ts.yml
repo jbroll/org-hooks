@@ -53,7 +53,7 @@ pre-commit:
       glob: "*.{ts,tsx}"
       run: >-
         npx --no-install dpdm --no-warning --no-tree
-        --exit-code circular:1 "src/**/*.{ts,tsx}"
+        --exit-code circular:1 "src/**/*.{ts,tsx}" "packages/*/src/**/*.{ts,tsx}"
     ts-dup-types:
       glob: "*.{ts,tsx}"
       run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src 'packages/*/src'

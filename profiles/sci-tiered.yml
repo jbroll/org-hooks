@@ -146,7 +146,7 @@ pre-commit:
             glob: "*.{ts,tsx}"
             run: >-
               npx --no-install dpdm --no-warning --no-tree
-              --exit-code "${DPDM_CIRCULAR:-circular:1}" "src/**/*.{ts,tsx}"
+              --exit-code "${DPDM_CIRCULAR:-circular:1}" "src/**/*.{ts,tsx}" "packages/*/src/**/*.{ts,tsx}"
           # Kotlin AST static analysis (detekt). Glob-gated: inert with no .kt.
           # --build-upon-default-config means a repo's optional detekt.yml only
           # overrides defaults; with none it runs pure defaults (zero-config-safe).
