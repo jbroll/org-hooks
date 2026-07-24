@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# ci/test — copy to <repo>/ci/test and chmod +x.
+#
+# The unit-test job. `sci push <repo>/ci/test` runs this on the CI host, from
+# the repo root of the job worktree. It hands off to the org-hooks orchestrator,
+# which sources CI_SETUP, runs `npm install`, and then
+# `npx vitest related --run --isolate --coverage` over ci/.changed-files.
+#
+# Exports (all required by $ORG_HOOKS/ci/test.sh):
+#   WORKTREE  — absolute path to the job's repo root
+#   CI_SETUP  — absolute path to the setup callback the orchestrator SOURCES
+#   ORG_HOOKS — org-hooks checkout ON THE CI HOST (the job worktree has no .git
+#               and no lefthook rc, so it cannot inherit this the way a local
+#               commit does; the default below is the convention)
+#
+# Emits coverage/lcov.info. Requires vitest + a v8 coverage provider with an
+# `lcov` reporter; see the org-hooks README for the lcov contract.
+set -euo pipefail
+WORKTREE="$(cd "$(dirname "$0")/.." && pwd)"; export WORKTREE
+export ORG_HOOKS="${ORG_HOOKS:-$HOME/src/org-hooks}"
+export CI_SETUP="$WORKTREE/ci/setup.sh"
+
+exec "$ORG_HOOKS/ci/test.sh"

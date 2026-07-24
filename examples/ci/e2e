@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# ci/e2e — copy to <repo>/ci/e2e and chmod +x.
+#
+# The E2E job. `sci push <repo>/ci/e2e` runs this on the CI host, from the repo
+# root of the job worktree. It hands off to the org-hooks orchestrator, which
+# sources CI_SETUP, runs `npm install`, picks Playwright specs from
+# ci/.changed-files, runs them, and then runs the flake gate.
+#
+# Exports (all required by $ORG_HOOKS/ci/e2e.sh):
+#   WORKTREE  — absolute path to the job's repo root
+#   CI_SETUP  — absolute path to the setup callback the orchestrator SOURCES
+#   ORG_HOOKS — org-hooks checkout ON THE CI HOST; e2e.sh runs its scripts
+#               (spec selection, flake gate, assert-all-ran) from there
+#
+# Optional knobs, exported here if this repo needs them:
+#   CI_E2E_SMOKE_CMD — command run when spec selection returns RUN_ALL.
+#                      Default `npm run test:e2e:smoke`. A repo without that
+#                      npm script MUST set this or every RUN_ALL commit fails.
+#   CI_SELECTOR      — a Playwright path/grep. When set, e2e.sh runs only that,
+#                      on --project=chromium, and SKIPS spec selection and the
+#                      flake gate. For targeted manual pushes; leave unset here.
+#
+# Emits coverage/e2e/lcov.info and test-results/results.json (relative to
+# WORKTREE). See the org-hooks README for the lcov and flake-gate requirements.
+set -euo pipefail
+WORKTREE="$(cd "$(dirname "$0")/.." && pwd)"; export WORKTREE
+export ORG_HOOKS="${ORG_HOOKS:-$HOME/src/org-hooks}"
+export CI_SETUP="$WORKTREE/ci/setup.sh"
+
+# Set this unless the repo has a `test:e2e:smoke` npm script.
+# export CI_E2E_SMOKE_CMD="npm run test:e2e"
+
+# Anything else this repo's E2E run needs, read by ci/setup.sh below.
+# export CI_E2E_PORTS="4310 5199"
+
+exec "$ORG_HOOKS/ci/e2e.sh"

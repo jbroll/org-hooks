@@ -105,6 +105,232 @@ The coverage ratchet runs at the end of each sci command — after `sci-run.sh` 
 retrieved the lcov from the CI host — so it always checks coverage from the current
 commit; the staged-file filtering lives in the shared `scripts/ratchet-staged.sh`.
 
+## The `ci/` contract required by `profiles/sci-tiered.yml`
+
+The `tier2-gpu` stage pushes `<repo>/ci/test` and `<repo>/ci/e2e` to simple-ci and
+gates the commit on both. The profile supplies none of that: the repo does, as four
+files under `ci/`. Copy them from `examples/ci/`.
+
+| File | Mode | Runs | Purpose |
+|---|---|---|---|
+| `ci/before-test-push` | executable | locally, before dispatch | writes `ci/.changed-files`, the staged-source manifest both jobs read |
+| `ci/test` | executable | on the CI host | unit job; delegates to `$ORG_HOOKS/ci/test.sh` |
+| `ci/e2e` | executable | on the CI host | E2E job; delegates to `$ORG_HOOKS/ci/e2e.sh` |
+| `ci/setup.sh` | **sourced** | on the CI host | per-repo env callback, sourced by both orchestrators |
+
+The three shims must be `chmod +x`. `ci-rsync.sh` rejects the push outright if
+`ci/test` or `ci/e2e` is not executable in the job worktree. `ci/before-test-push` is
+weaker: tier 2 runs it as `[ -x ci/before-test-push ] && ci/before-test-push`, so a
+missing or non-executable one is skipped without a word, and a failing one does not
+abort the job — either way both jobs run against whatever manifest is already on
+disk.
+
+`ci/setup.sh` is sourced with `.`, never executed: it must be POSIX `sh`, must not
+`exit` on a success path, and must not end on a statement that returns non-zero (the
+orchestrators run under `set -e`, so a non-zero final statement aborts the job with
+no message).
+
+### Variables the shims export
+
+`$ORG_HOOKS/ci/test.sh` and `$ORG_HOOKS/ci/e2e.sh` abort on a missing required
+variable via `${VAR:?}`.
+
+| Variable | Required by | Meaning |
+|---|---|---|
+| `WORKTREE` | `ci/test.sh`, `ci/e2e.sh` | absolute path to the job's repo root |
+| `CI_SETUP` | `ci/test.sh`, `ci/e2e.sh` | absolute path to the file they source |
+| `ORG_HOOKS` | `ci/e2e.sh` | org-hooks checkout **on the CI host** — `ci/e2e.sh` runs `scripts/e2e-select-cli.mjs`, `scripts/flake-gate.mjs` and `ci/assert-all-ran.sh` from it. `ci/test.sh` does not read it, but every shim needs it to locate the orchestrator. The job worktree has no `.git` and no lefthook `rc:`, so it cannot inherit `ORG_HOOKS` the way a local commit does; export it in the shim. |
+
+Optional knobs, all read on the CI host:
+
+| Variable | Default | Read by | Effect |
+|---|---|---|---|
+| `CI_E2E_SMOKE_CMD` | `npm run test:e2e:smoke` | `ci/e2e.sh` | command `eval`'d when spec selection returns `RUN_ALL`. **A repo without a `test:e2e:smoke` npm script MUST set this**, or every `RUN_ALL` commit fails. |
+| `CI_SELECTOR` | unset | `ci/e2e.sh` | when non-empty, runs `npx playwright test "$CI_SELECTOR" --project=chromium` and skips both spec selection and the flake gate. For targeted manual pushes. |
+| `CI_CHANGED_GLOB` | `^(src\|scripts\|ci\|packages)/.*\.(ts\|tsx\|js\|jsx\|mjs\|cjs)$` | `ci/before-test-push.sh` | which staged paths enter the manifest. It must cover every directory the union ratchet gates (`^(src\|packages)/`), or a gated file's tests never run and it ratchets at a false zero. |
+
+### Variables the lefthook `rc:` sets
+
+These are read by the `coverage-union` job, which runs **locally** under lefthook —
+they come from the repo's `rc:` file, not from a `ci/` shim.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `COVERAGE_LCOV` | `coverage/lcov.info` | unit lcov; used as **both** the remote source and the local destination of the `scp`, so it names the same repo-relative path on both sides |
+| `COVERAGE_E2E_LCOV` | `coverage/e2e/lcov.info` | E2E lcov, same on both sides |
+| `COVERAGE_E2E_BASELINE_LCOV` | `coverage/e2e-fullrun/lcov.info` | local landing path for the persisted full-run e2e lcov (see full-run carry-forward above) |
+| `COVERAGE_UNION_LCOV` | `coverage/union/lcov.info` | merged per-line union, written locally |
+| `COVERAGE_UNION_BASELINE` | `coverage-union-baseline.json` | committed baseline the union ratchet gates against |
+
+Ratchet thresholds (`COVERAGE_FLOOR`, `COVERAGE_TOLERANCE`, …) are in
+[Coverage ratchet](#coverage-ratchet) below.
+
+### lcov
+
+`ci/test` emits `coverage/lcov.info`; `ci/e2e` emits `coverage/e2e/lcov.info`. Both
+are produced by the repo's own tooling, not by org-hooks.
+
+`ci/test.sh` runs `npx vitest related --run --isolate --coverage`, so the repo needs
+`vitest`, a v8 coverage provider, and an `lcov` reporter:
+
+```ts
+coverage: { provider: "v8", reporter: ["text", "lcov"], include: ["src/**"] }
+```
+
+With vitest's default `reportsDirectory` that lands at `coverage/lcov.info`. The E2E
+lcov is entirely the repo's own wiring; it must land at `coverage/e2e/lcov.info`.
+
+Either may be absent. The `scp` of a missing file is swallowed, and
+`coverage-union-merge.mjs` treats a missing input as empty coverage — so the union
+degrades to the other source alone. If **neither** exists the merge is skipped
+entirely and the ratchet reads whatever `coverage/union/lcov.info` is already on
+disk from a previous commit.
+
+### `coverage-union-baseline.json`
+
+`scripts/ratchet-staged.sh` exits 0 when the baseline file is absent, so the union
+ratchet is inert until one is committed. Seeding it is a deliberate act.
+
+**Do not commit `{}` as a placeholder.** `parseBaseline` in
+`scripts/coverage-ratchet-lib.mjs` throws unless `version === 2`, so `{}` fails the
+moment tier 2 first produces a union lcov, with an uncaught
+`unsupported baseline version undefined — re-seed with --seed`. An empty-but-valid
+`{"version": 2, "files": {}}` is no better: every staged source file is then "not in
+baseline" and must reach the 75% floor on its own.
+
+The only correct starting content is a real measurement. Commit nothing, let one
+tier-2 run write `coverage/union/lcov.info`, then seed from it:
+
+```sh
+node "$ORG_HOOKS/scripts/coverage-ratchet.mjs" --seed \
+  --lcov coverage/union/lcov.info --baseline coverage-union-baseline.json
+```
+
+`--seed` writes the file and `git add`s it. A union lcov from a per-commit run holds
+only the files that commit's TIA-selected suites loaded; `--reseed` merges later runs
+in monotonically, taking the per-file max and keeping entries absent from the new
+lcov, so the baseline fills out over time and never loses a mark.
+
+The ratchet gates staged files matching `^(src|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs)$`
+minus `src/test/`, `__tests__/`, `*.test.*`, `*.spec.*`. Further per-repo exemptions
+go one path per line in `coverage-union-ratchet-exclude` (`#` comments supported).
+
+### `ci/.changed-files`
+
+`ci/before-test-push` writes it locally; `ci/test.sh` and `scripts/e2e-select-cli.mjs`
+read it on the CI host. Two things must both be true:
+
+**It must be gitignored.** `hygiene.sh fully-staged` (tier 0) rejects any untracked
+non-ignored file, so an unignored manifest fails every commit. Ignore
+`coverage/` too — the tier-2 job `scp`s lcovs into it locally, and the next commit's
+`fully-staged` would trip on them.
+
+**It must be force-included in the rsync.** `sci push` runs
+
+```
+rsync -a --delete ${CI_RSYNC_ARGS:-} --filter=':- .gitignore' --exclude=.git . DEST
+```
+
+so a gitignored file is excluded from the overlay and never reaches the host. The
+`--include` must come before the `.gitignore` filter, which is what `CI_RSYNC_ARGS`
+does:
+
+```sh
+CI_RSYNC_ARGS="--include=ci/.changed-files"
+```
+
+Put it in the repo's `ci/simple-ci.conf`. It is a property of the repo, not of the
+machine, so it belongs beside the code where every clone and every worktree gets it,
+and it applies to a manual `sci push` as well as to the hook. `sci` loads the **first**
+config it finds — `$CI_CONF`, `./ci/simple-ci.conf`, `~/.config/simple-ci.conf`,
+`<sci-dir>/simple-ci.conf` — and does not merge them, so a repo-local conf must also
+carry the host settings (`CI_HOSTS`, `CI_HOST`, `CI_REMOTE_SCRIPT`, `CI_SERVER_URL`)
+that `~/.config/simple-ci.conf` would have supplied. The alternatives —
+`~/.config/simple-ci.conf`, or exporting `CI_RSYNC_ARGS` from the lefthook `rc:` —
+avoid that duplication but leave the repo broken for anyone who has not set it up.
+If the repo also uses `ci/changed-functions`, add `--include=ci/.changed-functions`.
+
+**Signature of getting this wrong: a green unit job that ran no tests.**
+`ci/test.sh` tests `[ ! -s "$CHANGED" ]`, so a missing manifest is indistinguishable
+from an empty one — it prints `ci/test: no staged source/test files — nothing to
+run.` and exits 0. The commit goes green having tested nothing. `examples/ci/setup.sh`
+carries a precondition check that turns this into a loud failure; keep it.
+
+### The flake gate
+
+`scripts/flake-gate.mjs` runs from inside `$ORG_HOOKS/ci/e2e.sh`, after Playwright
+and before the exit-code decision — **not** from `profiles/sci-tiered.yml`. Reading
+only the profile suggests there is no flake gate.
+
+It appends this run's per-test outcomes to `~/ci-flake/<repo>-flake.jsonl`
+(`CI_FLAKE_FILE`, else derived from `CI_REPO`, which simple-ci's runner exports),
+then blocks the commit if any test that flaked or failed **this** run is non-pass in
+≥40% of its last 10 recorded runs, once it has at least 6 records. `test.skip`/
+`fixme` count as skipped and are ignored. It is skipped entirely on the
+`CI_SELECTOR` path.
+
+It reads `PLAYWRIGHT_JSON`, which `ci/e2e.sh` sets to
+`$WORKTREE/test-results/results.json`. **The repo's Playwright config must have a
+`json` reporter writing exactly there**, repo-root-relative — a config living in a
+subdirectory has to point its `outputFile` back up:
+
+```ts
+reporter: [["list"], ["json", { outputFile: "../../test-results/results.json" }]]
+```
+
+Without it the file never exists, the gate's top-level catch logs
+`[flake-gate] internal error, failing open (not blocking)` and exits 0. It never
+blocks and never records history — the second "looks wired, does nothing" case after
+the manifest above.
+
+Alongside it, `ci/assert-all-ran.sh` hard-fails the job if Playwright reported any
+test as "did not run".
+
+### Host prerequisite
+
+The build host needs a clone at `~/ci-workspace/<repo>`, whose directory name is the
+repo name in the push target, and `origin/HEAD` must resolve. The client needs a
+`simple-ci.conf` naming a reachable host. Both are simple-ci's, not org-hooks': see
+[simple-ci's quickstart](../simple-ci/docs/quickstart.md).
+
+### Tier-1 allowlists
+
+Tier 1 is grandfather-friendly: each check takes a repo-root allowlist, one entry per
+line, `#` comments ignored. Every entry should carry a reason.
+
+| File | Exempts | Checked by |
+|---|---|---|
+| `.no-reexports-allow` | path substrings — an intentional barrel file | `check-no-reexports.mjs` |
+| `.size-cap-allow` | path substrings — a file over the 500-line production cap | `hygiene.sh size-cap` |
+| `.dup-types-allow` | type **names** — a name deliberately declared in more than one file | `check-duplicate-types.mjs` |
+
+`.no-jsdoc-tags-allow` exempts path substrings from the banned-TSDoc-tag check;
+`sci-tiered.yml` does not run that check.
+
+### Adoption checklist
+
+1. Clone the repo on the build host at `~/ci-workspace/<repo>`, and confirm
+   `sci host` resolves from your machine.
+2. Copy `examples/lefthook.stub.yml` to `lefthook.yml`, list **only**
+   `profiles/sci-tiered.yml` under `configs:`, and declare no `pre-commit:` block.
+3. Create the `rc:` file: export `ORG_HOOKS`, then `. "$ORG_HOOKS/rc.sh"`.
+4. Copy `examples/ci/*` to `ci/`, `chmod +x ci/before-test-push ci/test ci/e2e`, and
+   fill in the repo specifics in `ci/setup.sh`.
+5. Set `CI_E2E_SMOKE_CMD` in `ci/e2e` unless the repo has a `test:e2e:smoke` script.
+6. Add `CI_RSYNC_ARGS="--include=ci/.changed-files"` to `ci/simple-ci.conf`, along
+   with that file's host settings — it replaces `~/.config/simple-ci.conf` rather
+   than extending it.
+7. Gitignore `ci/.changed-files` and `coverage/`.
+8. Add the npm scripts the profile runs: `type-check` and `knip`.
+9. Configure the lcov reporters: vitest v8 + `lcov` → `coverage/lcov.info`; the E2E
+   run → `coverage/e2e/lcov.info`.
+10. Add the Playwright `json` reporter at `test-results/results.json`.
+11. `lefthook install`, then make a throwaway commit. Read the unit job's log and
+    confirm it names the files it tested — a "nothing to run" pass means step 6 or 7
+    is wrong.
+12. Once tier 2 is green, seed `coverage-union-baseline.json` with
+    `coverage-ratchet.mjs --seed` and commit it.
+
 ## Coverage ratchet
 
 The ratchet is invoked from `profiles/sci.yml` (via `scripts/ratchet-staged.sh`),
@@ -168,7 +394,10 @@ src/components/MapView/hooks/useGpsSnap.ts
 
 **Env var overrides**: `COVERAGE_LCOV`, `COVERAGE_BASELINE`, `COVERAGE_E2E_LCOV`,
 `COVERAGE_E2E_BASELINE`, `COVERAGE_FLOOR` (0–1, default 0.75),
-`COVERAGE_TOLERANCE` (0–1, default 0.005 = 0.5 pp).
+`COVERAGE_TOLERANCE` (0–1, default 0.005 = 0.5 pp),
+`COVERAGE_REGRESSION_WAIVER` (0–1, default 0.90 — a baselined file at or above this
+may regress freely), `COVERAGE_LINE_TOLERANCE` (absolute covered-line slack, default
+5 — a drop passes within *either* the pp tolerance or this many lines).
 
 **Tests**: pure helpers live in `scripts/coverage-ratchet-lib.mjs`; run the
 suite with `node --test scripts/coverage-ratchet.test.mjs` (uses node:test,
@@ -215,6 +444,10 @@ devDependencies and invoked via `npx --no-install` — never global.
 
 See `examples/lefthook.stub.yml` for the step-by-step checklist. Repos
 are onboarded **one at a time** and verified before moving on.
+
+A repo adopting `profiles/sci-tiered.yml` also supplies the four `ci/` files —
+templates in `examples/ci/`, contract and checklist in
+[The `ci/` contract required by `profiles/sci-tiered.yml`](#the-ci-contract-required-by-profilessci-tieredyml).
 
 ## Tagging
 

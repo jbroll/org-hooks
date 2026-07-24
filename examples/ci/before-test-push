@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# ci/before-test-push — copy to <repo>/ci/before-test-push and chmod +x.
+#
+# Runs LOCALLY (in your working tree, where git history is intact) before the
+# tier-2 job dispatches. It writes ci/.changed-files, the staged-source manifest
+# that ci/test and ci/e2e read on the CI host.
+#
+# Exports: ORG_HOOKS, so the org-hooks writer can be found.
+# Reads (optional): CI_CHANGED_GLOB — ERE selecting which staged paths land in
+#   the manifest. Default:
+#     ^(src|scripts|ci|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs)$
+#   Set it only if this repo's source lives elsewhere. It MUST cover every
+#   directory the union ratchet gates (default ^(src|packages)/), or a gated
+#   file's tests never run and it ratchets at a false zero.
+#
+# ci/.changed-files must be gitignored AND force-included in the rsync
+# (CI_RSYNC_ARGS) — see "The ci/ contract required by profiles/sci-tiered.yml"
+# in the org-hooks README.
+set -euo pipefail
+export ORG_HOOKS="${ORG_HOOKS:-$HOME/src/org-hooks}"
+
+# export CI_CHANGED_GLOB='^(src|packages|apps)/.*\.(ts|tsx)$'
+
+exec "$ORG_HOOKS/ci/before-test-push.sh"
