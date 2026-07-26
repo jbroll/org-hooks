@@ -9,6 +9,10 @@ set -euo pipefail
 . "${CI_SETUP:?CI_SETUP must point at the consumer setup callback}"
 cd "$WORKTREE"
 
+# Kill the entire process group on exit so Playwright's webServer (Vite) doesn't
+# survive as an orphan holding port 4310/5199 when fail-fast kills the job.
+trap 'kill -- -$$ 2>/dev/null || true' EXIT INT TERM
+
 export CI=true
 npm install
 
