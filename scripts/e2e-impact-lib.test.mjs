@@ -64,6 +64,47 @@ describe("coveredSrcFns", () => {
   });
 });
 
+describe("coveredSrcFns mapPath", () => {
+  const fsEntries = [
+    {
+      url: "http://localhost:5199/@fs/home/john/src/KinoQ/packages/camera-protocol/src/httpBridge.ts",
+      functions: [{ functionName: "signRequest", ranges: [{ count: 1 }] }],
+    },
+    { url: "http://localhost:5199/src/App.tsx", functions: [{ functionName: "App", ranges: [{ count: 1 }] }] },
+  ];
+
+  it("without mapPath, keeps today's first-/src/ behaviour", () => {
+    assert.deepEqual(coveredSrcFns(fsEntries), {
+      "src/KinoQ/packages/camera-protocol/src/httpBridge.ts": ["signRequest"],
+      "src/App.tsx": ["App"],
+    });
+  });
+
+  it("with mapPath, uses the mapper's path", () => {
+    const mapPath = (url) => {
+      const i = url.indexOf("/packages/");
+      if (i !== -1) return url.slice(i + 1);
+      const j = url.indexOf("/src/");
+      return j === -1 ? null : `packages/web/${url.slice(j + 1)}`;
+    };
+    assert.deepEqual(coveredSrcFns(fsEntries, undefined, mapPath), {
+      "packages/camera-protocol/src/httpBridge.ts": ["signRequest"],
+      "packages/web/src/App.tsx": ["App"],
+    });
+  });
+
+  it("drops entries the mapper rejects", () => {
+    assert.deepEqual(coveredSrcFns(fsEntries, undefined, () => null), {});
+  });
+
+  it("mapPath still sees entries whose url lacks /src/", () => {
+    const entries = [{ url: "http://x/@fs/a/packages/p/lib/z.ts", functions: [{ functionName: "z", ranges: [{ count: 1 }] }] }];
+    assert.deepEqual(coveredSrcFns(entries, undefined, (u) => u.slice(u.indexOf("/packages/") + 1)), {
+      "packages/p/lib/z.ts": ["z"],
+    });
+  });
+});
+
 describe("specFiles", () => {
   it("returns the array for a legacy file-level entry, keys for an object entry", () => {
     assert.deepEqual(specFiles(["src/a.ts", "src/b.ts"]), ["src/a.ts", "src/b.ts"]);

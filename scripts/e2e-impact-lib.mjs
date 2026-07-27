@@ -33,11 +33,18 @@ export function coveredSrcFiles(entries, frontendPort) {
  * { "src/a.ts": ["fnA", "fnB"], ... }. Names come from V8 `functionName`;
  * anonymous ("") functions are dropped (they can't be matched at selection time
  * and defer to the coarse fallback). Same URL/port filtering as coveredSrcFiles.
+ *
+ * `mapPath` overrides path derivation entirely: it receives the raw URL and
+ * returns the map key, or null to drop the entry. A monorepo needs it because
+ * the default takes the FIRST "/src/", which a checkout under ~/src/ or a Vite
+ * /@fs/ URL puts in the wrong place.
+ *
  * @param {Array<{url:string, functions?: Array<{functionName?:string, ranges?: Array<{count:number}>}>}>} entries
  * @param {number|string} [frontendPort]
+ * @param {(url: string) => string|null} [mapPath]
  * @returns {Record<string, string[]>}
  */
-export function coveredSrcFns(entries, frontendPort) {
+export function coveredSrcFns(entries, frontendPort, mapPath) {
   if (!Array.isArray(entries)) return {};
   /** @type {Record<string, Set<string>>} */
   const named = {};
@@ -45,10 +52,17 @@ export function coveredSrcFns(entries, frontendPort) {
   const executed = new Set();
   for (const e of entries) {
     const url = e?.url ?? "";
-    const i = url.indexOf("/src/");
-    if (i === -1) continue;
     if (frontendPort && !url.includes(`:${frontendPort}`)) continue;
-    const file = url.slice(i + 1).split("?")[0];
+    let file;
+    if (mapPath) {
+      file = mapPath(url);
+      if (!file) continue;
+    } else {
+      const i = url.indexOf("/src/");
+      if (i === -1) continue;
+      file = url.slice(i + 1);
+    }
+    file = file.split("?")[0];
     const set = (named[file] ??= new Set());
     for (const f of e.functions ?? []) {
       if (!(f.ranges ?? []).some((r) => r.count > 0)) continue;
