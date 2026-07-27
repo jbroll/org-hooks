@@ -17,8 +17,14 @@ import { foldImpact, makeCoverageOptions, makeMapPath, parseRewrites } from "./e
 
 function argValues(argv, flag) {
   const out = [];
-  for (let i = 0; i < argv.length; i++) if (argv[i] === flag) out.push(argv[i + 1]);
-  return out.filter(Boolean);
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] !== flag) continue;
+    const val = argv[i + 1];
+    if (val === undefined) fail(`${flag} requires a value but none was given`);
+    if (val.startsWith("--")) fail(`${flag} requires a value, got the flag '${val}' instead`);
+    out.push(val);
+  }
+  return out;
 }
 const argValue = (argv, flag, fallback) => argValues(argv, flag)[0] ?? fallback;
 
@@ -27,15 +33,28 @@ function fail(message) {
   process.exit(1);
 }
 
+// A resolved --out/--impact escaping the worktree (e.g. `--out ..`) would
+// hand rmSync a path outside it, deleting whatever is there.
+function assertInsideWorktree(dir, worktree, flag) {
+  const rel = path.relative(worktree, dir);
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+    fail(`--${flag} resolves to ${dir}, which is not inside worktree ${worktree}`);
+  }
+}
+
 async function loadMonocart() {
   try {
     return (await import("monocart-coverage-reports")).CoverageReport;
   } catch (err) {
-    fail(
-      `monocart-coverage-reports is not installed.\n` +
-        `  Run 'npm ci' in ${path.dirname(import.meta.dirname)}.\n` +
-        `  (${err.message})`,
-    );
+    if (err.code === "ERR_MODULE_NOT_FOUND") {
+      fail(
+        `monocart-coverage-reports is not installed.\n` +
+          `  Run 'npm ci' in ${path.dirname(import.meta.dirname)}.\n` +
+          `  (${err.message})`,
+      );
+    } else {
+      fail(`monocart-coverage-reports failed to load: ${err.message}`);
+    }
   }
 }
 
@@ -49,7 +68,14 @@ function readDumps(rawDir) {
   }
   const names = readdirSync(rawDir).filter((n) => n.endsWith(".json")).sort();
   if (names.length === 0) fail(`${rawDir} is empty — the Playwright fixture wrote nothing.`);
-  return names.map((n) => JSON.parse(readFileSync(path.join(rawDir, n), "utf8")));
+  return names.map((n) => {
+    const file = path.join(rawDir, n);
+    try {
+      return JSON.parse(readFileSync(file, "utf8"));
+    } catch (err) {
+      fail(`${file} is not valid JSON (${err.message})`);
+    }
+  });
 }
 
 async function report(argv) {
@@ -57,8 +83,15 @@ async function report(argv) {
   const rawDir = path.resolve(worktree, argValue(argv, "--raw", "coverage/e2e-raw"));
   const outDir = path.resolve(worktree, argValue(argv, "--out", "coverage/e2e"));
   const impactDir = path.resolve(worktree, argValue(argv, "--impact", "coverage/e2e-impact"));
+  assertInsideWorktree(outDir, worktree, "out");
+  assertInsideWorktree(impactDir, worktree, "impact");
   const origins = argValues(argv, "--origin");
-  const rewrites = parseRewrites(argValues(argv, "--rewrite"));
+  let rewrites;
+  try {
+    rewrites = parseRewrites(argValues(argv, "--rewrite"));
+  } catch (err) {
+    fail(err.message);
+  }
 
   if (origins.length === 0) fail("at least one --origin is required (e.g. --origin localhost:5199)");
 
