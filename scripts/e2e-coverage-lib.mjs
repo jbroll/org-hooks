@@ -15,9 +15,8 @@ export function parseRewrites(specs) {
 }
 
 /**
- * Replace the first rule that matches at a path-segment boundary (string start
- * or after a '/'), so `src/=packages/web/src/` cannot fire inside `mysrc/`.
- * The primitive — callers want rewriteSourcePath.
+ * Replace the first rule matching at a path-segment boundary, so
+ * `src/=packages/web/src/` cannot fire inside `mysrc/`. Callers want rewriteSourcePath.
  */
 export function applyRewrites(p, rewrites) {
   for (const { from, to } of rewrites) {
@@ -28,23 +27,25 @@ export function applyRewrites(p, rewrites) {
   return p;
 }
 
-/**
- * A rule mapping a bare `src/` into a package matches at any segment boundary,
- * so unguarded it would turn packages/a/src/x.ts into packages/a/packages/b/src/x.ts.
- * A path that already names a package needs no rule.
- */
-export function rewriteSourcePath(p, rewrites) {
-  if (p.includes("packages/")) return p;
-  return applyRewrites(p, rewrites);
+/** True when `p` already sits under `seg` as a path segment (start or after '/'). */
+function underSegment(p, seg) {
+  return p === seg || p.startsWith(`${seg}/`) || p.includes(`/${seg}/`);
 }
 
 /**
- * True for a vendor path in any of the three shapes this file deals with: a
- * full URL, a monocart source path, or a normalised repo-relative path (which
- * can start with `node_modules/` with no leading slash).
- * Relies on Vite's default `preserveSymlinks: false`, which resolves a
- * workspace package's `node_modules/@scope/pkg` symlink to its `packages/`
- * realpath before this ever sees it — a workspace dep never reaches here.
+ * Skip a rule whose target's leading segment (e.g. `packages` from
+ * `packages/web/src/`) the path already sits under — covers both a path already
+ * inside the target package and one under a sibling package of the same name.
+ */
+export function rewriteSourcePath(p, rewrites) {
+  const applicable = rewrites.filter((r) => !underSegment(p, r.to.split("/")[0]));
+  return applyRewrites(p, applicable);
+}
+
+/**
+ * True for a vendor path as URL, monocart source path, or normalised repo-relative path.
+ * Relies on Vite's `preserveSymlinks: false`, which resolves a workspace package's
+ * `node_modules/@scope/pkg` symlink to its `packages/` realpath before this sees it.
  */
 export function isVendorPath(p) {
   return p.startsWith("node_modules/") || p.includes("/node_modules/");
@@ -52,11 +53,12 @@ export function isVendorPath(p) {
 
 /**
  * URL -> impact-map key, matching the repo-relative paths in ci/.changed-files.
- * normalisePath anchors on /packages/ first, so a workspace file keeps its
- * package identity; only a bare /src/ reaches the rewrites.
+ * `origins`, when given, mirrors makeCoverageOptions' entryFilter so the lcov
+ * and the impact map can't disagree about what counts as a source origin.
  */
-export function makeMapPath(rewrites, cwd) {
+export function makeMapPath(rewrites, cwd, origins) {
   return (url) => {
+    if (origins && !origins.some((o) => url.includes(o))) return null;
     const clean = url.split("?")[0];
     const fs = clean.indexOf("/@fs/");
     const candidate = fs !== -1 ? clean.slice(fs + 4) : clean;
@@ -72,7 +74,7 @@ export function makeCoverageOptions({ outputDir, origins, rewrites }) {
   return {
     name: "E2E Coverage",
     outputDir,
-    reports: ["v8", "lcovonly"],
+    reports: ["lcovonly"],
     // A checkout under a path containing /src/ (e.g. ~/src/repo) makes an
     // absolute /@fs/ dep url look like source, so node_modules is excluded here.
     entryFilter: (entry) =>

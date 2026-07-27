@@ -194,9 +194,17 @@ is the CLI's.
 
 `--rewrite from=to` replaces `from` at a path-segment boundary. A monorepo whose
 Vite dev server serves one package's source at a bare `/src/` needs it: without
-the rewrite those files normalise to `src/…` and merge with nothing. The same
-rules key the impact map, so the two outputs cannot disagree about what a source
-path is.
+the rewrite those files normalise to `src/…` and merge with nothing. A rule is
+skipped for a path already sitting under the rule's own target package, so it
+never double-applies to a path that already names a package. The same rules key
+the impact map, so the two outputs cannot disagree about what a source path is.
+
+`--require-prefix <prefix>` (repeatable) fails the run if any normalised `SF:`
+path in the generated lcov does not start with one of the given prefixes,
+naming the offending paths. It catches `--rewrite` silently failing to fire —
+without it, an unrewritten path can still pass the "lcov exists, names at least
+one file" checks while merging with nothing at the union stage. Omitting the
+flag skips the check entirely.
 
 With `E2E_BUILD_IMPACT_MAP` set, the CLI also writes
 `coverage/e2e-impact/coverage.jsonl` for `build-e2e-map.mjs`.

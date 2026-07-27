@@ -3,6 +3,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { normalisePath } from "./coverage-ratchet-lib.mjs";
 import {
   applyRewrites,
   foldImpact,
@@ -65,6 +66,9 @@ describe("rewriteSourcePath", () => {
   it("still maps an origin-prefixed bare src/ path", () => {
     assert.equal(rewriteSourcePath("localhost-5199/src/App.tsx", rw), "localhost-5199/packages/web/src/App.tsx");
   });
+  it("leaves a path already under the target's package untouched", () => {
+    assert.equal(rewriteSourcePath("packages/web/src/packages/foo.ts", rw), "packages/web/src/packages/foo.ts");
+  });
 });
 
 describe("makeMapPath", () => {
@@ -96,6 +100,12 @@ describe("makeMapPath", () => {
       mapPath("http://localhost:5199/@fs/home/john/src/KinoQ/packages/camera-protocol/src/auth.ts"),
       "packages/camera-protocol/src/auth.ts",
     );
+  });
+  it("drops an entry from an origin not in the given list", () => {
+    const filtered = makeMapPath(parseRewrites(["src/=packages/web/src/"]), "/home/john/src/KinoQ", [
+      "localhost:5199",
+    ]);
+    assert.equal(filtered("http://localhost:4310/src/App.tsx"), null);
   });
 });
 
@@ -160,6 +170,10 @@ describe("makeCoverageOptions", () => {
   it("rewrites an already-pathed source", () => {
     assert.equal(opts.sourcePath("src/App.tsx", {}), "packages/web/src/App.tsx");
   });
+  it("round-trips a bare /src/ V8 entry to a packages/-prefixed normalised path", () => {
+    const rewritten = opts.sourcePath("src/App.tsx", { distFile: "localhost-5199/src/App.tsx" });
+    assert.equal(normalisePath(rewritten, "src", "/repo").startsWith("packages/"), true);
+  });
   it("keeps only /src/ sources", () => {
     assert.equal(opts.sourceFilter("packages/web/src/App.tsx"), true);
     assert.equal(opts.sourceFilter("node_modules/react/index.js"), false);
@@ -206,5 +220,15 @@ describe("foldImpact", () => {
       },
     ];
     assert.deepEqual(foldImpact(viteDump, kinoqMapPath), []);
+  });
+  it("drops a dump whose only entry is from an origin not in the list", () => {
+    const originMapPath = makeMapPath(parseRewrites(["src/=packages/web/src/"]), "/repo", ["localhost:5199"]);
+    const otherOriginDump = [
+      {
+        spec: "packages/e2e/export.spec.ts",
+        data: [{ url: "http://localhost:4310/src/App.tsx", functions: [{ functionName: "App", ranges: [{ count: 1 }] }] }],
+      },
+    ];
+    assert.deepEqual(foldImpact(otherOriginDump, originMapPath), []);
   });
 });

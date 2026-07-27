@@ -9,10 +9,11 @@
 // Usage:
 //   node e2e-coverage.mjs report --worktree <dir> --origin host:port \
 //     [--raw coverage/e2e-raw] [--out coverage/e2e] [--impact coverage/e2e-impact] \
-//     [--rewrite from=to ...]
+//     [--rewrite from=to ...] [--require-prefix prefix ...]
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { normalisePath } from "./coverage-ratchet-lib.mjs";
 import { foldImpact, makeCoverageOptions, makeMapPath, parseRewrites } from "./e2e-coverage-lib.mjs";
 
 function argValues(argv, flag) {
@@ -105,12 +106,27 @@ async function report(argv) {
 
   const lcov = path.join(outDir, "lcov.info");
   if (!existsSync(lcov)) fail(`monocart produced no ${lcov} from ${dumps.length} dumps.`);
-  const files = readFileSync(lcov, "utf8").split("\n").filter((l) => l.startsWith("SF:")).length;
-  if (files === 0) fail(`${lcov} names no files — check --origin and --rewrite against the dump urls.`);
-  process.stdout.write(`e2e-coverage: ${dumps.length} dumps -> ${files} files -> ${lcov}\n`);
+  const sfLines = readFileSync(lcov, "utf8").split("\n").filter((l) => l.startsWith("SF:"));
+  if (sfLines.length === 0) fail(`${lcov} names no files — check --origin and --rewrite against the dump urls.`);
+  process.stdout.write(`e2e-coverage: ${dumps.length} dumps -> ${sfLines.length} files -> ${lcov}\n`);
+
+  const requirePrefixes = argValues(argv, "--require-prefix");
+  if (requirePrefixes.length > 0) {
+    const offending = sfLines
+      .map((l) => normalisePath(l.slice(3), "src", worktree))
+      .filter((p) => !requirePrefixes.some((prefix) => p.startsWith(prefix)));
+    if (offending.length > 0) {
+      const shown = offending.slice(0, 5).join(", ");
+      const more = offending.length > 5 ? ` (+${offending.length - 5} more)` : "";
+      fail(
+        `${offending.length} source path(s) in ${lcov} do not start with any of --require-prefix ` +
+          `${requirePrefixes.join(", ")}: ${shown}${more} — --rewrite is likely not matching these paths.`,
+      );
+    }
+  }
 
   if (process.env.E2E_BUILD_IMPACT_MAP) {
-    const records = foldImpact(dumps, makeMapPath(rewrites, worktree));
+    const records = foldImpact(dumps, makeMapPath(rewrites, worktree, origins));
     rmSync(impactDir, { recursive: true, force: true });
     mkdirSync(impactDir, { recursive: true });
     const jsonl = records.map((r) => JSON.stringify(r)).join("\n");
