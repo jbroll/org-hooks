@@ -9,7 +9,7 @@ import { coveredSrcFns } from "./e2e-impact-lib.mjs";
 export function parseRewrites(specs) {
   return (specs ?? []).map((s) => {
     const i = s.indexOf("=");
-    if (i === -1) throw new Error(`--rewrite needs 'from=to', got: ${s}`);
+    if (i <= 0) throw new Error(`--rewrite needs 'from=to', got: ${s}`);
     return { from: s.slice(0, i), to: s.slice(i + 1) };
   });
 }

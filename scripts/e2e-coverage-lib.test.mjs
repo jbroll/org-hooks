@@ -22,6 +22,9 @@ describe("parseRewrites", () => {
   it("throws on a spec with no '='", () => {
     assert.throws(() => parseRewrites(["src/"]), /--rewrite/);
   });
+  it("throws on a spec with an empty 'from'", () => {
+    assert.throws(() => parseRewrites(["=foo"]), /--rewrite/);
+  });
 });
 
 describe("applyRewrites", () => {
