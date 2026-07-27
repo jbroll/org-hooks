@@ -167,8 +167,8 @@ Ratchet thresholds (`COVERAGE_FLOOR`, `COVERAGE_TOLERANCE`, …) are in
 
 ### lcov
 
-`ci/test` emits `coverage/lcov.info`; `ci/e2e` emits `coverage/e2e/lcov.info`. Both
-are produced by the repo's own tooling, not by org-hooks.
+`ci/test` emits `coverage/lcov.info`; `ci/e2e` emits `coverage/e2e/lcov.info`. The
+unit lcov is produced by the repo's own tooling, not by org-hooks.
 
 `ci/test.sh` runs `npx vitest related --run --isolate --coverage`, so the repo needs
 `vitest`, a v8 coverage provider, and an `lcov` reporter:
@@ -177,8 +177,29 @@ are produced by the repo's own tooling, not by org-hooks.
 coverage: { provider: "v8", reporter: ["text", "lcov"], include: ["src/**"] }
 ```
 
-With vitest's default `reportsDirectory` that lands at `coverage/lcov.info`. The E2E
-lcov is entirely the repo's own wiring; it must land at `coverage/e2e/lcov.info`.
+With vitest's default `reportsDirectory` that lands at `coverage/lcov.info`.
+
+The E2E lcov must land at `coverage/e2e/lcov.info`. `scripts/e2e-coverage.mjs`
+produces it from raw Playwright V8 dumps:
+
+```sh
+node "$ORG_HOOKS/scripts/e2e-coverage.mjs" report \
+  --worktree . --origin localhost:5199 --rewrite 'src/=packages/web/src/'
+```
+
+The repo supplies a Playwright fixture that writes `{spec, data}` JSON per test
+into `coverage/e2e-raw/`, and a `globalTeardown` that spawns the CLI. Everything
+below the Playwright API — monocart, the entry filter, the source-path rewrites —
+is the CLI's.
+
+`--rewrite from=to` replaces `from` at a path-segment boundary. A monorepo whose
+Vite dev server serves one package's source at a bare `/src/` needs it: without
+the rewrite those files normalise to `src/…` and merge with nothing. The same
+rules key the impact map, so the two outputs cannot disagree about what a source
+path is.
+
+With `E2E_BUILD_IMPACT_MAP` set, the CLI also writes
+`coverage/e2e-impact/coverage.jsonl` for `build-e2e-map.mjs`.
 
 Either may be absent. The `scp` of a missing file is swallowed, and
 `coverage-union-merge.mjs` treats a missing input as empty coverage — so the union
@@ -324,11 +345,14 @@ line, `#` comments ignored. Every entry should carry a reason.
 8. Add the npm scripts the profile runs: `type-check` and `knip`.
 9. Configure the lcov reporters: vitest v8 + `lcov` → `coverage/lcov.info`; the E2E
    run → `coverage/e2e/lcov.info`.
-10. Add the Playwright `json` reporter at `test-results/results.json`.
-11. `lefthook install`, then make a throwaway commit. Read the unit job's log and
+10. Run `npm ci` in the org-hooks checkout — on your machine and on the CI host.
+    `scripts/e2e-coverage.mjs` needs `monocart-coverage-reports`; it exits 1 naming
+    this step if the dependency is missing.
+11. Add the Playwright `json` reporter at `test-results/results.json`.
+12. `lefthook install`, then make a throwaway commit. Read the unit job's log and
     confirm it names the files it tested — a "nothing to run" pass means step 6 or 7
     is wrong.
-12. Once tier 2 is green, seed `coverage-union-baseline.json` with
+13. Once tier 2 is green, seed `coverage-union-baseline.json` with
     `coverage-ratchet.mjs --seed` and commit it.
 
 ## Coverage ratchet
