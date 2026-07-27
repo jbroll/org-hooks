@@ -381,12 +381,18 @@ flock -s -w 600 8 || exit 1
 ```
 
 The update takes the same lock **exclusive**, so it waits for running jobs and a
-job starting mid-update waits for the install. Drive it from simple-ci's
-`CI_IDLE_HOOK`, which fires only when nothing is running or queued:
+job starting mid-update waits for the install. That lock is what makes the update
+safe, so it can run on a plain schedule — in simple-ci's `~/.config/simple-ci/schedule.tcl`:
 
-```sh
-export CI_IDLE_HOOK='sh $HOME/.config/simple-ci/org-hooks-sync.sh'
+```tcl
+cron {every 15m at 0m} {
+    catch {exec sh $::env(HOME)/.config/simple-ci/org-hooks-sync.sh &}
+}
 ```
+
+Not `CI_IDLE_HOOK`: that fires on a busy→idle transition observed by a 10-second
+maintenance tick, so a job shorter than one tick never registers as busy and the
+hook never runs.
 
 The script belongs outside the checkout — `git pull` would rewrite it while `sh`
 is still reading it:
