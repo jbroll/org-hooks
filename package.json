@@ -1,0 +1,10 @@
+{
+  "name": "org-hooks",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Shared git-hook profiles and CI orchestration scripts.",
+  "dependencies": {
+    "monocart-coverage-reports": "^2.12.11"
+  }
+}
