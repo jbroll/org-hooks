@@ -39,6 +39,18 @@ export function rewriteSourcePath(p, rewrites) {
 }
 
 /**
+ * True for a vendor path in any of the three shapes this file deals with: a
+ * full URL, a monocart source path, or a normalised repo-relative path (which
+ * can start with `node_modules/` with no leading slash).
+ * Relies on Vite's default `preserveSymlinks: false`, which resolves a
+ * workspace package's `node_modules/@scope/pkg` symlink to its `packages/`
+ * realpath before this ever sees it — a workspace dep never reaches here.
+ */
+export function isVendorPath(p) {
+  return p.startsWith("node_modules/") || p.includes("/node_modules/");
+}
+
+/**
  * URL -> impact-map key, matching the repo-relative paths in ci/.changed-files.
  * normalisePath anchors on /packages/ first, so a workspace file keeps its
  * package identity; only a bare /src/ reaches the rewrites.
@@ -50,7 +62,7 @@ export function makeMapPath(rewrites, cwd) {
     const candidate = fs !== -1 ? clean.slice(fs + 4) : clean;
     if (!candidate.includes("/packages/") && !candidate.includes("/src/")) return null;
     const normalised = normalisePath(candidate, "src", cwd);
-    if (normalised.startsWith("/") || normalised.includes("://")) return null;
+    if (normalised.startsWith("/") || normalised.includes("://") || isVendorPath(normalised)) return null;
     return rewriteSourcePath(normalised, rewrites);
   };
 }
@@ -66,7 +78,7 @@ export function makeCoverageOptions({ outputDir, origins, rewrites }) {
     entryFilter: (entry) =>
       origins.some((o) => entry.url.includes(o)) &&
       entry.url.includes("/src/") &&
-      !entry.url.includes("/node_modules/"),
+      !isVendorPath(entry.url),
     // Vite dev source maps carry bare filenames in `sources`; resolve them
     // against the compiled script's URL before any prefix rule can match.
     sourcePath: (sp, info) => {
@@ -76,8 +88,7 @@ export function makeCoverageOptions({ outputDir, origins, rewrites }) {
       }
       return rewriteSourcePath(resolved, rewrites);
     },
-    sourceFilter: (sourcePath) =>
-      sourcePath.includes("/src/") && !sourcePath.includes("node_modules/"),
+    sourceFilter: (sourcePath) => sourcePath.includes("/src/") && !isVendorPath(sourcePath),
     // The CLI builds one report per run; a clean would discard nothing but
     // could race a partially-written cache.
     cleanCache: false,

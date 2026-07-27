@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import {
   applyRewrites,
   foldImpact,
+  isVendorPath,
   makeCoverageOptions,
   makeMapPath,
   parseRewrites,
@@ -84,6 +85,39 @@ describe("makeMapPath", () => {
   it("returns null for a url with no source path", () => {
     assert.equal(mapPath("http://localhost:5199/node_modules/.vite/deps/react.js"), null);
   });
+  it("returns null for the vite client shim served from a checkout under ~/src/", () => {
+    assert.equal(
+      mapPath("http://localhost:5199/@fs/home/john/src/KinoQ/node_modules/vite/dist/client/env.mjs"),
+      null,
+    );
+  });
+  it("still resolves a legitimate workspace source served over /@fs/", () => {
+    assert.equal(
+      mapPath("http://localhost:5199/@fs/home/john/src/KinoQ/packages/camera-protocol/src/auth.ts"),
+      "packages/camera-protocol/src/auth.ts",
+    );
+  });
+});
+
+describe("isVendorPath", () => {
+  it("matches a full URL's /node_modules/ segment", () => {
+    assert.equal(
+      isVendorPath("http://localhost:5199/@fs/home/john/src/KinoQ/node_modules/vite/dist/client/env.mjs"),
+      true,
+    );
+  });
+  it("matches a monocart source path with a leading node_modules/", () => {
+    assert.equal(isVendorPath("node_modules/react/index.js"), true);
+  });
+  it("matches a normalised repo-relative path starting with node_modules/", () => {
+    assert.equal(isVendorPath("node_modules/vite/dist/client/env.mjs"), true);
+  });
+  it("leaves a package source alone", () => {
+    assert.equal(isVendorPath("packages/camera-protocol/src/auth.ts"), false);
+  });
+  it("leaves a bare src/ path alone", () => {
+    assert.equal(isVendorPath("src/App.tsx"), false);
+  });
 });
 
 describe("makeCoverageOptions", () => {
@@ -157,5 +191,20 @@ describe("foldImpact", () => {
   });
   it("drops a dump that covers nothing", () => {
     assert.deepEqual(foldImpact([{ spec: "a.spec.ts", data: [] }], mapPath), []);
+  });
+  it("drops a dump whose only entry is the vite client shim", () => {
+    const kinoqMapPath = makeMapPath(parseRewrites(["src/=packages/web/src/"]), "/home/john/src/KinoQ");
+    const viteDump = [
+      {
+        spec: "packages/e2e/export.spec.ts",
+        data: [
+          {
+            url: "http://localhost:5199/@fs/home/john/src/KinoQ/node_modules/vite/dist/client/env.mjs",
+            functions: [{ functionName: "init", ranges: [{ count: 1 }] }],
+          },
+        ],
+      },
+    ];
+    assert.deepEqual(foldImpact(viteDump, kinoqMapPath), []);
   });
 });
