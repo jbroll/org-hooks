@@ -146,6 +146,7 @@ Optional knobs, all read on the CI host:
 | Variable | Default | Read by | Effect |
 |---|---|---|---|
 | `CI_E2E_SMOKE_CMD` | `npm run test:e2e:smoke` | `ci/e2e.sh` | command `eval`'d when spec selection returns `RUN_ALL`. **A repo without a `test:e2e:smoke` npm script MUST set this**, or every `RUN_ALL` commit fails. |
+| `CI_E2E_SPEC_CMD` | `npx playwright test` | `ci/e2e.sh` | command `eval`'d with the selected spec paths appended when selection returns a list. Both run from the repo root, so **a repo whose `playwright.config.ts` lives in a workspace MUST set this** to a command that enters that workspace — otherwise playwright finds no config and runs with no `baseURL` and no `webServer`. |
 | `CI_SELECTOR` | unset | `ci/e2e.sh` | when non-empty, runs `npx playwright test "$CI_SELECTOR" --project=chromium` and skips both spec selection and the flake gate. For targeted manual pushes. |
 | `CI_CHANGED_GLOB` | `^(src\|scripts\|ci\|packages)/.*\.(ts\|tsx\|js\|jsx\|mjs\|cjs)$` | `ci/before-test-push.sh` | which staged paths enter the manifest. It must cover every directory the union ratchet gates (`^(src\|packages)/`), or a gated file's tests never run and it ratchets at a false zero. |
 
@@ -345,7 +346,8 @@ line, `#` comments ignored. Every entry should carry a reason.
 3. Create the `rc:` file: export `ORG_HOOKS`, then `. "$ORG_HOOKS/rc.sh"`.
 4. Copy `examples/ci/*` to `ci/`, `chmod +x ci/before-test-push ci/test ci/e2e`, and
    fill in the repo specifics in `ci/setup.sh`.
-5. Set `CI_E2E_SMOKE_CMD` in `ci/e2e` unless the repo has a `test:e2e:smoke` script.
+5. Set `CI_E2E_SMOKE_CMD` in `ci/e2e` unless the repo has a `test:e2e:smoke` script,
+   and `CI_E2E_SPEC_CMD` unless `playwright.config.ts` sits at the repo root.
 6. Add `CI_RSYNC_ARGS="--include=ci/.changed-files"` to `ci/simple-ci.conf`, along
    with that file's host settings — it replaces `~/.config/simple-ci.conf` rather
    than extending it.

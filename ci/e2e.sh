@@ -36,8 +36,11 @@ else
   echo "ci/e2e: running selected specs:"
   # shellcheck disable=SC2001
   echo "$SEL" | sed 's/^/  /'
-  # shellcheck disable=SC2086
-  npx playwright test $SEL 2>&1 | tee "$WORKTREE/playwright-output.log"
+  # Runs from $WORKTREE, so a consumer whose playwright.config.ts lives in a
+  # workspace must name a command that enters it — a bare `npx playwright test`
+  # at the root silently runs with defaults: no baseURL, no webServer.
+  # shellcheck disable=SC2086,SC2294
+  eval ${CI_E2E_SPEC_CMD:-npx playwright test} $SEL 2>&1 | tee "$WORKTREE/playwright-output.log"
   PW_EXIT=${PIPESTATUS[0]}
 fi
 
