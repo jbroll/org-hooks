@@ -61,8 +61,12 @@ export function makeCoverageOptions({ outputDir, origins, rewrites }) {
     name: "E2E Coverage",
     outputDir,
     reports: ["v8", "lcovonly"],
+    // A checkout under a path containing /src/ (e.g. ~/src/repo) makes an
+    // absolute /@fs/ dep url look like source, so node_modules is excluded here.
     entryFilter: (entry) =>
-      origins.some((o) => entry.url.includes(o)) && entry.url.includes("/src/"),
+      origins.some((o) => entry.url.includes(o)) &&
+      entry.url.includes("/src/") &&
+      !entry.url.includes("/node_modules/"),
     // Vite dev source maps carry bare filenames in `sources`; resolve them
     // against the compiled script's URL before any prefix rule can match.
     sourcePath: (sp, info) => {
@@ -72,7 +76,8 @@ export function makeCoverageOptions({ outputDir, origins, rewrites }) {
       }
       return rewriteSourcePath(resolved, rewrites);
     },
-    sourceFilter: (sourcePath) => sourcePath.includes("/src/"),
+    sourceFilter: (sourcePath) =>
+      sourcePath.includes("/src/") && !sourcePath.includes("node_modules/"),
     // The CLI builds one report per run; a clean would discard nothing but
     // could race a partially-written cache.
     cleanCache: false,

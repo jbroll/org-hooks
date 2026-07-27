@@ -108,6 +108,18 @@ describe("makeCoverageOptions", () => {
   it("drops a prebundled dep", () => {
     assert.equal(opts.entryFilter({ url: "http://localhost:5199/node_modules/.vite/deps/react.js" }), false);
   });
+  it("drops a /@fs/ dep whose absolute path only looks like source because the checkout sits under ~/src/", () => {
+    assert.equal(
+      opts.entryFilter({ url: "http://localhost:5199/@fs/home/john/src/KinoQ/node_modules/vite/dist/client/env.mjs" }),
+      false,
+    );
+  });
+  it("keeps a /@fs/ workspace package source", () => {
+    assert.equal(
+      opts.entryFilter({ url: "http://localhost:5199/@fs/home/john/src/KinoQ/packages/camera-protocol/src/auth.ts" }),
+      true,
+    );
+  });
   it("resolves a bare sourcemap filename against the script url, then rewrites", () => {
     assert.equal(opts.sourcePath("App.tsx", { distFile: "localhost-5199/src/App.tsx" }), "localhost-5199/packages/web/src/App.tsx");
   });
@@ -117,6 +129,7 @@ describe("makeCoverageOptions", () => {
   it("keeps only /src/ sources", () => {
     assert.equal(opts.sourceFilter("packages/web/src/App.tsx"), true);
     assert.equal(opts.sourceFilter("node_modules/react/index.js"), false);
+    assert.equal(opts.sourceFilter("localhost-5199/@fs/home/john/src/KinoQ/node_modules/vite/dist/client/env.mjs"), false);
   });
 });
 
