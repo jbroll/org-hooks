@@ -355,13 +355,52 @@ line, `#` comments ignored. Every entry should carry a reason.
    run → `coverage/e2e/lcov.info`.
 10. Run `npm ci` in the org-hooks checkout — on your machine and on the CI host.
     `scripts/e2e-coverage.mjs` needs `monocart-coverage-reports`; it exits 1 naming
-    this step if the dependency is missing.
+    this step if the dependency is missing. Keep the host's checkout current too —
+    see [Updating the host's checkout](#updating-the-hosts-checkout).
 11. Add the Playwright `json` reporter at `test-results/results.json`.
 12. `lefthook install`, then make a throwaway commit. Read the unit job's log and
     confirm it names the files it tested — a "nothing to run" pass means step 6 or 7
     is wrong.
 13. Once tier 2 is green, seed `coverage-union-baseline.json` with
     `coverage-ratchet.mjs --seed` and commit it.
+
+### Updating the host's checkout
+
+One org-hooks checkout serves every job on a build host, and jobs run
+concurrently. `npm ci` deletes `node_modules` wholesale, so an update that runs
+while a job is importing from it fails that job with `ERR_MODULE_NOT_FOUND` —
+which reads as a code bug, not a stale host.
+
+Two pieces keep that from happening. A job takes `$ORG_HOOKS/.cilock` **shared**
+in its `ci/setup.sh`; because that file is sourced, the descriptor stays open for
+the job's life:
+
+```sh
+exec 8<"$ORG_HOOKS/.cilock"
+flock -s -w 600 8 || exit 1
+```
+
+The update takes the same lock **exclusive**, so it waits for running jobs and a
+job starting mid-update waits for the install. Drive it from simple-ci's
+`CI_IDLE_HOOK`, which fires only when nothing is running or queued:
+
+```sh
+export CI_IDLE_HOOK='sh $HOME/.config/simple-ci/org-hooks-sync.sh'
+```
+
+The script belongs outside the checkout — `git pull` would rewrite it while `sh`
+is still reading it:
+
+```sh
+flock -x -w 60 "$ORG_HOOKS/.cilock" sh -c '
+    cd "$ORG_HOOKS" && git pull --ff-only -q
+    [ package-lock.json -nt node_modules ] && npm ci --silent
+'
+```
+
+`ci/setup.sh` should also fail loudly when `node_modules` is absent or older than
+`package-lock.json`, so a host that never got its update names the reason instead
+of failing somewhere downstream. Gitignore `.cilock`.
 
 ## Coverage ratchet
 

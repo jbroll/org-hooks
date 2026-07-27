@@ -1,3 +1,6 @@
 lefthook-local.yml
 *.log
 node_modules/
+
+# Guards this checkout against a concurrent update; created on the CI host.
+.cilock
