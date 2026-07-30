@@ -271,13 +271,20 @@ CI_RSYNC_ARGS="--include=ci/.changed-files"
 
 Put it in the repo's `ci/simple-ci.conf`. It is a property of the repo, not of the
 machine, so it belongs beside the code where every clone and every worktree gets it,
-and it applies to a manual `sci push` as well as to the hook. `sci` loads the **first**
-config it finds — `$CI_CONF`, `./ci/simple-ci.conf`, `~/.config/simple-ci.conf`,
-`<sci-dir>/simple-ci.conf` — and does not merge them, so a repo-local conf must also
-carry the host settings (`CI_HOSTS`, `CI_HOST`, `CI_REMOTE_SCRIPT`, `CI_SERVER_URL`)
-that `~/.config/simple-ci.conf` would have supplied. The alternatives —
-`~/.config/simple-ci.conf`, or exporting `CI_RSYNC_ARGS` from the lefthook `rc:` —
-avoid that duplication but leave the repo broken for anyone who has not set it up.
+and it applies to a manual `sci push` as well as to the hook — both run `sci` from the
+repo root. Setting it in the lefthook `rc:` instead reaches the hook and nothing else.
+
+`sci` loads the **first** config it finds — `$CI_CONF`, `./ci/simple-ci.conf`,
+`~/.config/simple-ci.conf`, `<sci-dir>/simple-ci.conf` — and does not merge them, so a
+repo-local conf shadows the host settings (`CI_HOSTS`, `CI_HOST`, `CI_REMOTE_SCRIPT`,
+`CI_SERVER_URL`) that `~/.config/simple-ci.conf` would have supplied. Source that file
+rather than restating them, and real host names stay out of the repo:
+
+```sh
+. "$HOME/.config/simple-ci.conf"
+CI_RSYNC_ARGS="--include=ci/.changed-files"
+```
+
 If the repo also uses `ci/changed-functions`, add `--include=ci/.changed-functions`.
 
 **Signature of getting this wrong: a green unit job that ran no tests.**
@@ -348,9 +355,9 @@ line, `#` comments ignored. Every entry should carry a reason.
    fill in the repo specifics in `ci/setup.sh`.
 5. Set `CI_E2E_SMOKE_CMD` in `ci/e2e` unless the repo has a `test:e2e:smoke` script,
    and `CI_E2E_SPEC_CMD` unless `playwright.config.ts` sits at the repo root.
-6. Add `CI_RSYNC_ARGS="--include=ci/.changed-files"` to `ci/simple-ci.conf`, along
-   with that file's host settings — it replaces `~/.config/simple-ci.conf` rather
-   than extending it.
+6. `ci/simple-ci.conf` (copied in step 4) sources `~/.config/simple-ci.conf` and sets
+   `CI_RSYNC_ARGS="--include=ci/.changed-files"`. The repo conf replaces that file
+   rather than extending it, hence the source line.
 7. Gitignore `ci/.changed-files` and `coverage/`.
 8. Add the npm scripts the profile runs: `type-check` and `knip`.
 9. Configure the lcov reporters: vitest v8 + `lcov` → `coverage/lcov.info`; the E2E
