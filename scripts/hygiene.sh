@@ -33,6 +33,8 @@ case "$cmd" in
   eof-ws)
     for f in "$@"; do
       [ -f "$f" ] || continue
+      # A PNG has neither trailing whitespace nor a final newline to speak of.
+      grep -Iq . "$f" 2>/dev/null || continue
       # Trailing whitespace
       if grep -nE ' +$' "$f" >/dev/null 2>&1; then
         echo "  trailing whitespace: $f"
