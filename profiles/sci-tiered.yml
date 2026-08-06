@@ -29,7 +29,8 @@
 #        hygiene, format-lint, dup-types, no-reexports, size-caps). Runs FIRST so
 #        a cheap violation fails in <1s instead of waiting out typecheck/knip/dpdm.
 #     2. tier1-static  — group(parallel: true): the slow local static analysis
-#        (typecheck, knip, dpdm circular). Runs only if tier1-instant passed.
+#        (typecheck, knip, dpdm circular; mypy/vulture/deptry/pytest; detekt).
+#        Runs only if tier1-instant passed.
 #     3. tier2-gpu     — group(parallel: true): a single coverage-union job that
 #        sci-dispatches BOTH the unit and e2e GPU runs in parallel, then merges
 #        their lcovs per-line and runs ONE union ratchet. Runs ONLY if both local
@@ -60,6 +61,15 @@
 #
 # Required npm scripts in the consumer: type-check, knip, and (for the sci
 # fallback path) test:coverage, test:e2e.
+#
+# All three language packs are folded in and glob-gated, so a repo gets the
+# checks for the languages it actually has. Host tools: gitleaks, biome (npx),
+# ruff, uv, ktlint, detekt. A Python project pins mypy and pytest in its own dev
+# group — they run from the project env, not an isolated `uv tool run`, so
+# third-party imports type-check and the suite sees its dependencies. Kotlin
+# compile/test are still absent: they need Gradle and, for Android, the SDK, so
+# they belong in a build-host dispatch alongside tier2 rather than in a local
+# tier.
 
 pre-commit:
   # Fail-fast across tiers: any tier1 failure breaks the pipe → tier2 skipped.
@@ -112,6 +122,24 @@ pre-commit:
           - name: ts-test-size-cap
             glob: "*.{test,spec}.{ts,tsx,js,jsx}"
             run: '"${ORG_HOOKS}/scripts/hygiene.sh" test-size-cap {staged_files}'
+          # Python format+lint+hygiene (glob-gated: inert in repos with no .py).
+          # Host tool ruff; mypy/vulture/deptry/pytest are in tier1-static below.
+          # Mirrors profiles/python.yml, except that the whole-project tools run
+          # per Python project via scripts/py-run.sh instead of at the repo root —
+          # in a polyglot repo the pyproject.toml sits in a subdirectory. ruff
+          # needs no such help: it resolves config from each file's own path.
+          - name: py-format-lint
+            glob: "*.py"
+            run: >-
+              ruff check --fix --no-cache {staged_files}
+              && ruff format {staged_files}
+            stage_fixed: true
+          - name: py-size-cap
+            glob: "*.py"
+            run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'
+          - name: py-test-size-cap
+            glob: "*.py"
+            run: '"${ORG_HOOKS}/scripts/hygiene.sh" test-size-cap {staged_files}'
           # Kotlin format+lint+hygiene (glob-gated: inert in repos with no .kt).
           # Host tools ktlint/detekt (JDK 17+); detekt is in tier1-static below.
           # Mirrors profiles/kotlin.yml. Gradle compile/test needs the SDK → stays
@@ -147,6 +175,32 @@ pre-commit:
             run: >-
               npx --no-install dpdm --no-warning --no-tree
               --exit-code "${DPDM_CIRCULAR:-circular:1}" "src/**/*.{ts,tsx}" "packages/*/src/**/*.{ts,tsx}"
+          # Python whole-project analysis, each run at its own project root by
+          # py-run.sh. mypy and pytest come from the project's own env (`uv run`),
+          # so a repo pins them in its dev group and controls strictness in
+          # pyproject.toml; vulture and deptry need no project deps and run via
+          # `uv tool run`. py-test lives here rather than in tier2 because a
+          # Python suite runs locally in about a second — there is nothing to
+          # dispatch, and a red suite should gate the GPU tier like everything
+          # else in tier 1.
+          - name: py-typecheck
+            glob: "*.py"
+            run: '"${ORG_HOOKS}/scripts/py-run.sh" "uv run mypy" {staged_files}'
+          - name: py-deadcode
+            glob: "*.py"
+            run: '"${ORG_HOOKS}/scripts/py-run.sh" "uv tool run vulture . --min-confidence 80" {staged_files}'
+          - name: py-deps
+            glob: "*.{py,toml}"
+            run: '"${ORG_HOOKS}/scripts/py-run.sh" "uv tool run deptry ." {staged_files}'
+          - name: py-circular
+            glob: "*.py"
+            run: >-
+              "${ORG_HOOKS}/scripts/py-run.sh"
+              'if [ -f .importlinter ] || grep -qs "^\[tool\.importlinter" pyproject.toml; then uv tool run --from import-linter lint-imports; else echo "py-circular: no import-linter contract; skipping"; fi'
+              {staged_files}
+          - name: py-test
+            glob: "*.py"
+            run: '"${ORG_HOOKS}/scripts/py-run.sh" "uv run pytest -q" {staged_files}'
           # Kotlin AST static analysis (detekt). Glob-gated: inert with no .kt.
           # --build-upon-default-config means a repo's optional detekt.yml only
           # overrides defaults; with none it runs pure defaults (zero-config-safe).

@@ -27,7 +27,7 @@ here.
 | `profiles/kotlin.yml` | adds to pre-commit | ktlint format+lint+autofix (staged, re-staged) · detekt AST static analysis · size-cap · test-size-cap — all at commit, parallel, glob-gated (mirrors `ts.yml`/`python.yml`). Lint/static only — Gradle compile/test needs the SDK and belongs in the repo's own lefthook (dispatch to a build host). Java = a future `profiles/java.yml` (spotless/checkstyle), same shape. |
 | `profiles/specs.yml` | pre-commit/post-commit | AI-Roller `air check` / artifact-drift (ai-roller only) |
 | `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e (flat `commands:` style) — composes `scripts/sci-run.sh` (dispatch + lcov sync) and `scripts/ratchet-staged.sh` (inline coverage ratchet) |
-| `profiles/sci-tiered.yml` | pre-commit, pre-merge-commit | **self-contained** tiered fail-fast gate — ALL checks inlined (12 static + 2 GPU); pull ONLY this file with ZERO consumer pre-commit overrides |
+| `profiles/sci-tiered.yml` | pre-commit, pre-merge-commit | **self-contained** tiered fail-fast gate — the TS, Python and Kotlin packs inlined and glob-gated (25 static + 1 GPU); pull ONLY this file with ZERO consumer pre-commit overrides |
 
 ## Shared Biome config (`config/biome.base.json`)
 
@@ -57,6 +57,9 @@ shared base:
 
 A repo that wants a two-tier, fail-fast pre-commit dispatches static checks
 first and only runs the expensive GPU test jobs if every static check passed.
+It carries the TypeScript, Python and Kotlin packs inlined and glob-gated, so a
+polyglot repo gets each language's checks on the commits that touch it, and a
+single-language repo pays nothing for the other two.
 This profile is **self-contained**: a consumer pulls ONLY `profiles/sci-tiered.yml`
 (not `lefthook-common.yml` / `profiles/ts.yml` / `profiles/sci.yml`) and declares
 NO `pre-commit:` block of its own — its `lefthook.yml` is just `remotes:` + `rc:`.
@@ -74,6 +77,21 @@ the consumer's `rc:`), never config overrides:
 | `SCI_WT` | derived | CI queue name; **not needed** — derived from the git common dir so all worktrees of a repo resolve to the repo dir name |
 | `SCI_BIN` | `/home/john/src/simple-ci/sci` | simple-ci binary; falls back to `npm run test:coverage`/`test:e2e` if absent |
 | `COVERAGE_E2E_BASELINE_LCOV` | `coverage/e2e-fullrun/lcov.info` | local path the persisted full-run e2e lcov is scp'd to and fed to the union merge as `--e2e-baseline` (full-e2e carry-forward, below) |
+
+**Python projects in a subdirectory.** mypy, pytest and deptry resolve config,
+dependencies and import roots from the directory they start in, which in a
+polyglot repo is not the repo root. `scripts/py-run.sh` maps each staged file to
+its nearest ancestor `pyproject.toml` and runs the command there, once per
+distinct project — so `host-bridge/` in a mostly-TypeScript repo is gated the same
+as a flat Python repo. A staged `.py` under no `pyproject.toml` fails the commit
+rather than being skipped. (`profiles/python.yml`, the standalone pack, still
+assumes the project is at the repo root.)
+
+mypy and pytest run as `uv run` from the project's own environment, so a repo
+pins them in its dev group; third-party imports then type-check and the suite
+sees its dependencies. vulture, deptry and import-linter need no project deps and
+run via `uv tool run`. Every tool reads its settings from the repo's
+`pyproject.toml`, so strictness stays repo-local.
 
 **Full-run e2e carry-forward.** The per-commit gate runs only the **TIA-selected**
 e2e spec subset, so a source file whose real e2e coverage comes from an
@@ -518,7 +536,7 @@ node <ORG_HOOKS>/scripts/coverage-ratchet.mjs --seed \
 | lefthook | hook runner | `npm i -g lefthook` |
 | gitleaks | secret scanning | release binary → `~/.local/bin` |
 | ruff | Python format+lint | (already present) `~/.local/bin` |
-| mypy | Python type check | `uv tool install mypy` |
+| uv | Python runner — `uv tool run` for vulture/deptry/import-linter, `uv run` for the project's own mypy/pytest | `~/.local/bin` |
 | ktlint | Kotlin format+lint | release binary → `/usr/local/bin/ktlint` (self-executable, needs JDK 17+) |
 | detekt | Kotlin static analysis | `detekt-cli-<ver>-all.jar` → wrap as `detekt` on PATH (`java -jar …`) |
 | typos | spell check (optional) | `cargo install typos-cli` |

@@ -52,10 +52,12 @@ case "$cmd" in
     # coverage and are exempt). Default 500; override SIZE_CAP. An
     # allowlisted file (one path-substring per line in .size-cap-allow,
     # '#' comments) is exempt — fail-on-new / grandfather pattern.
-    # Covers flat layouts (src/, bin/, lib/) and common monorepo layouts
-    # (packages/<pkg>/src/, apps/<app>/src/, services/<svc>/src/, etc.).
+    # A src/, bin/, or lib/ segment ANYWHERE marks production source, so this
+    # holds for a flat repo, a packages/<pkg>/src/ monorepo, a Python project in
+    # its own subdirectory, and Gradle's <module>/src/main/kotlin/ alike. Only
+    # staged paths reach here, so a vendored or built src/ can't be picked up.
     cap="${SIZE_CAP:-500}"
-    prod='^((src|bin|lib)/|(packages|apps|services|clients|servers)/[^/]+/(src|bin|lib)/).*\.(ts|tsx|js|jsx|mjs|cjs|py)$'
+    prod='(^|/)(src|bin|lib)/.*\.(ts|tsx|js|jsx|mjs|cjs|py|kt|kts)$'
     allow_file=".size-cap-allow"
     is_allowed() {
       [ -f "$allow_file" ] || return 1
@@ -86,6 +88,7 @@ case "$cmd" in
       case "$f" in
         *.test.ts|*.test.tsx|*.test.js|*.test.jsx|*.spec.ts|*.spec.tsx) ;;
         test_*.py|*/test_*.py|*_test.py|conftest.py|*/conftest.py) ;;  # pytest layout
+        *Test.kt|*Tests.kt|*Spec.kt) ;;                                 # JVM layout
         *) continue;;
       esac
       n=$(wc -l <"$f" | tr -d ' ')
