@@ -27,12 +27,12 @@ pre-commit:
   parallel: true
   commands:
     ts-format-lint:
-      glob: "*.{ts,tsx,js,jsx,mjs,cjs,json}"
+      glob: "*.{ts,tsx,js,jsx,mjs,cjs,json,css}"
       # Auto-fix (format + SAFE lint fixes) and re-stage, so a formatting-only
       # diff self-heals at commit time instead of failing the commit and bouncing
       # back to the author (or an agent) for a manual reformat + recommit. biome
       # --write applies only safe fixes; anything needing --unsafe still surfaces
-      # as an error and blocks the commit.
+      # as an error and blocks the commit, as does any remaining lint warning.
       #
       # CAVEAT (parallel: true): this command WRITES while the read-only checks
       # (ts-typecheck/ts-deadcode/ts-circular/...) read the same tree. biome only
@@ -41,7 +41,7 @@ pre-commit:
       # where a staged file is reformatted, a concurrent reader could see it mid-
       # write and fail THIS commit; a retry then passes (file is already
       # formatted) — strictly better than the previous guaranteed fail-and-bounce.
-      run: npx --no-install biome check --write --no-errors-on-unmatched {staged_files}
+      run: npx --no-install biome check --write --error-on-warnings --no-errors-on-unmatched {staged_files}
       stage_fixed: true
     ts-typecheck:
       glob: "*.{ts,tsx,json}"
