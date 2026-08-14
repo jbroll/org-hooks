@@ -282,6 +282,8 @@ pre-commit:
                   wt_e=$("$SCI" path "$job_e" 2>/dev/null)
                   [ -n "$wt_u" ] && { mkdir -p "$(dirname "$LCOV")"; scp -q "$ci_host:$wt_u/$LCOV" "$LCOV" 2>/dev/null || true; }
                   [ -n "$wt_e" ] && { mkdir -p "$(dirname "$E2E_LCOV")"; scp -q "$ci_host:$wt_e/$E2E_LCOV" "$E2E_LCOV" 2>/dev/null || true; }
+                  [ -n "$wt_u" ] && [ ! -f "$LCOV" ] && { echo "tier2: unit lcov never arrived from $ci_host:$wt_u/$LCOV"; exit 1; }
+                  [ -n "$wt_e" ] && [ ! -f "$E2E_LCOV" ] && { echo "tier2: e2e lcov never arrived from $ci_host:$wt_e/$E2E_LCOV"; exit 1; }
                   # ssh+cat (not scp): OpenSSH 9+ scp uses SFTP, which does NOT
                   # shell-expand the remote $HOME; cat over ssh does. Missing file
                   # -> empty output -> merge treats it as no-op (graceful degrade).
@@ -295,6 +297,7 @@ pre-commit:
 
                 UNION_LCOV=${COVERAGE_UNION_LCOV:-coverage/union/lcov.info}
                 UNION_BASELINE=${COVERAGE_UNION_BASELINE:-coverage-union-baseline.json}
+                rm -f "$UNION_LCOV"
                 if [ -n "${ORG_HOOKS:-}" ] && { [ -f "$LCOV" ] || [ -f "$E2E_LCOV" ]; }; then
                   node "${ORG_HOOKS}/scripts/coverage-union-merge.mjs" \
                     --unit "$LCOV" --e2e "$E2E_LCOV" --e2e-baseline "$E2E_BASELINE_LCOV" \

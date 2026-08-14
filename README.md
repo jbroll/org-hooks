@@ -228,11 +228,12 @@ flag skips the check entirely.
 With `E2E_BUILD_IMPACT_MAP` set, the CLI also writes
 `coverage/e2e-impact/coverage.jsonl` for `build-e2e-map.mjs`.
 
-Either may be absent. The `scp` of a missing file is swallowed, and
+Either may be absent because no job of that kind was dispatched, and
 `coverage-union-merge.mjs` treats a missing input as empty coverage — so the union
-degrades to the other source alone. If **neither** exists the merge is skipped
-entirely and the ratchet reads whatever `coverage/union/lcov.info` is already on
-disk from a previous commit.
+degrades to the other source alone. But a job that *was* dispatched and produced no
+lcov fails the tier-2 stage outright, and `coverage/union/lcov.info` is deleted
+before every merge — so a skipped merge never leaves the ratchet reading a stale
+union from a previous commit.
 
 ### `coverage-union-baseline.json`
 
