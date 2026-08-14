@@ -117,13 +117,18 @@ export function formatBaseline(files) {
  * @param {string} file
  * @param {number|undefined} prevPct  Baseline ratio 0-1, or undefined if not in baseline.
  * @param {FileMetric|undefined} cur  Current lcov entry.
- * @param {{ floor: number; tolerance: number; regressionWaiver?: number; lineTolerance?: number }} opts
+ * @param {{ floor: number; tolerance: number; regressionWaiver?: number; waiverDrop?: number; lineTolerance?: number }} opts
  *   floor             — minimum for a file with no baseline entry (new files).
  *   tolerance         — slack vs baseline % to absorb instrumentation noise.
- *   regressionWaiver  — a baselined file at/above this ratio may regress freely
- *                       (a well-covered file shouldn't fail the build over one
- *                       new error-path line; that just pushes toward excludes).
- *                       Default 1 (off — no waiver) preserves strict behavior.
+ *   regressionWaiver  — a baselined file at/above this ratio may regress without
+ *                       hitting the tolerance/lineTolerance checks, as long as the
+ *                       drop from baseline stays within waiverDrop (a well-covered
+ *                       file shouldn't fail the build over one new error-path
+ *                       line; that just pushes toward excludes). Defaults to 1
+ *                       (off) here; the CLI passes 0.90.
+ *   waiverDrop        — bounds the waiver: past this many percentage points below
+ *                       baseline, even a file still above regressionWaiver is a
+ *                       regression. Default 0.05.
  *   lineTolerance     — absolute covered-line slack. A drop within EITHER the pct
  *                       tolerance OR this many covered lines passes. On a low-
  *                       coverage e2e-dominated file (few lines = many pp), a 1-2
@@ -135,7 +140,7 @@ export function checkOne(
   file,
   prevPct,
   cur,
-  { floor, tolerance, regressionWaiver = 1, lineTolerance = 5 },
+  { floor, tolerance, regressionWaiver = 1, waiverDrop = 0.05, lineTolerance = 5 },
 ) {
   // .d.ts files are pure type declarations — erased at compile, zero runtime
   // lines, so they can never appear in lcov. Never gate them (no per-repo
@@ -153,8 +158,9 @@ export function checkOne(
   }
   if (!cur)
     return { file, reason: "previously measured but absent from current lcov — regressed to 0" };
-  // A baselined file that stays at/above the waiver is allowed to regress.
-  if (pct(cur) >= regressionWaiver) return null;
+  // A baselined file at/above the waiver absorbs small drops without churn, but
+  // the waiver is not a floor to slide to: past waiverDrop it is a regression.
+  if (pct(cur) >= regressionWaiver && prevPct - pct(cur) <= waiverDrop) return null;
   // Pass within EITHER the pct tolerance OR a small absolute covered-line drop.
   // The baseline stores only a %, so derive the implied prior hit count from the
   // CURRENT line total (stable for an incidental touch); a sub-lineTolerance drop

@@ -500,7 +500,11 @@ src/components/MapView/hooks/useGpsSnap.ts
 `COVERAGE_E2E_BASELINE`, `COVERAGE_FLOOR` (0–1, default 0.75),
 `COVERAGE_TOLERANCE` (0–1, default 0.005 = 0.5 pp),
 `COVERAGE_REGRESSION_WAIVER` (0–1, default 0.90 — a baselined file at or above this
-may regress freely), `COVERAGE_LINE_TOLERANCE` (absolute covered-line slack, default
+may regress without tripping the tolerance/lineTolerance checks),
+`COVERAGE_REGRESSION_WAIVER_DROP` (0–1, default 0.05 — bounds the waiver: past this
+many percentage points below baseline it is a regression regardless, e.g. a file
+baselined at 100% may fall to 95% unremarked but fails at 94%),
+`COVERAGE_LINE_TOLERANCE` (absolute covered-line slack, default
 5 — a drop passes within *either* the pp tolerance or this many lines).
 
 **Tests**: pure helpers live in `scripts/coverage-ratchet-lib.mjs`; run the

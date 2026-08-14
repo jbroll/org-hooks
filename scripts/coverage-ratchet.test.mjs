@@ -240,6 +240,18 @@ test("checkOne: default opts (no waiver) preserve strict no-regression", () => {
   assert.match(r.reason, /coverage dropped/);
 });
 
+test("a file baselined at 100% may not slide to the waiver floor", () => {
+  const cur = { linesFound: 100, linesHit: 90 };
+  const result = checkOne("src/a.ts", 1, cur, { floor: 0.9, tolerance: 0.005 });
+  assert.ok(result, "a 10pp drop must be reported even above the waiver");
+  assert.match(result.reason, /coverage dropped/);
+});
+
+test("the waiver still forgives a drop within waiverDrop", () => {
+  const cur = { linesFound: 100, linesHit: 97 };
+  assert.equal(checkOne("src/a.ts", 1, cur, { floor: 0.9, tolerance: 0.005 }), null);
+});
+
 // ───────────────────────────── ratchetUp ────────────────────────────────────
 
 test("ratchetUp: improves baseline, leaves untouched files alone", () => {

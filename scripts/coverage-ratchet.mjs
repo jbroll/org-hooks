@@ -31,7 +31,11 @@
 //   --tolerance N     0–1 slack vs baseline % to absorb coverage-instrument noise
 //                     (default: $COVERAGE_TOLERANCE or 0.005 = 0.5 pp)
 //   --regression-waiver N  0–1; a baselined file at/above this ratio may regress
-//                     freely (default: $COVERAGE_REGRESSION_WAIVER or 0.90)
+//                     within --waiver-drop without tripping tolerance/lineTolerance
+//                     (default: $COVERAGE_REGRESSION_WAIVER or 0.90)
+//   --waiver-drop N   0–1; bounds --regression-waiver — past this many
+//                     percentage points below baseline it is a regression
+//                     regardless (default: $COVERAGE_REGRESSION_WAIVER_DROP or 0.05)
 //   --src-root DIR    strip path prefix up to this dir name when normalising lcov
 //                     SF: paths (default: src)
 //   --seed            HARD RESET: write current lcov to baseline unconditionally,
@@ -68,6 +72,7 @@ let baselinePath = process.env.COVERAGE_BASELINE ?? "coverage-baseline.json";
 let floor = Number(process.env.COVERAGE_FLOOR ?? "0.75");
 let tolerance = Number(process.env.COVERAGE_TOLERANCE ?? "0.005");
 let regressionWaiver = Number(process.env.COVERAGE_REGRESSION_WAIVER ?? "0.90");
+let waiverDrop = Number(process.env.COVERAGE_REGRESSION_WAIVER_DROP ?? "0.05");
 let lineTolerance = Number(process.env.COVERAGE_LINE_TOLERANCE ?? "5");
 let srcRoot = "src";
 let seedMode = false;
@@ -82,6 +87,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (arg === "--floor") floor = Number(process.argv[++i]);
   else if (arg === "--tolerance") tolerance = Number(process.argv[++i]);
   else if (arg === "--regression-waiver") regressionWaiver = Number(process.argv[++i]);
+  else if (arg === "--waiver-drop") waiverDrop = Number(process.argv[++i]);
   else if (arg === "--line-tolerance") lineTolerance = Number(process.argv[++i]);
   else if (arg === "--src-root") srcRoot = process.argv[++i];
   else if (arg === "--seed") seedMode = true;
@@ -183,6 +189,7 @@ for (const file of stagedFiles) {
     floor,
     tolerance,
     regressionWaiver,
+    waiverDrop,
     lineTolerance,
   });
   if (fail) failures.push(fail);
