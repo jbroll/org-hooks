@@ -17,8 +17,11 @@ export CI=true
 npm install
 
 if [ -n "${CI_SELECTOR:-}" ]; then
-  echo "ci/e2e: explicit selector '$CI_SELECTOR' (targeted; chromium; TIA + flake gate skipped)"
-  npx playwright test "$CI_SELECTOR" --project=chromium 2>&1 | tee "$WORKTREE/playwright-output.log"
+  echo "ci/e2e: explicit selector '$CI_SELECTOR' (targeted; TIA + flake gate skipped)"
+  # Same command as the selection path below: a bare `npx playwright test` runs
+  # from $WORKTREE, where a consumer whose config lives in a workspace has none.
+  # shellcheck disable=SC2086,SC2294
+  eval ${CI_E2E_SPEC_CMD:-npx playwright test} "$CI_SELECTOR" 2>&1 | tee "$WORKTREE/playwright-output.log"
   rc=${PIPESTATUS[0]}
   bash "$ORG_HOOKS/ci/assert-all-ran.sh" "$WORKTREE/playwright-output.log"
   exit "$rc"

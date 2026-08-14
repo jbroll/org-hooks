@@ -165,7 +165,7 @@ Optional knobs, all read on the CI host:
 |---|---|---|---|
 | `CI_E2E_SMOKE_CMD` | `npm run test:e2e:smoke` | `ci/e2e.sh` | command `eval`'d when spec selection returns `RUN_ALL`. **A repo without a `test:e2e:smoke` npm script MUST set this**, or every `RUN_ALL` commit fails. |
 | `CI_E2E_SPEC_CMD` | `npx playwright test` | `ci/e2e.sh` | command `eval`'d with the selected spec paths appended when selection returns a list. Both run from the repo root, so **a repo whose `playwright.config.ts` lives in a workspace MUST set this** to a command that enters that workspace — otherwise playwright finds no config and runs with no `baseURL` and no `webServer`. |
-| `CI_SELECTOR` | unset | `ci/e2e.sh` | when non-empty, runs `npx playwright test "$CI_SELECTOR" --project=chromium` and skips both spec selection and the flake gate. For targeted manual pushes. |
+| `CI_SELECTOR` | unset | `ci/e2e.sh` | when non-empty, runs `CI_E2E_SPEC_CMD` with the selector appended and skips both spec selection and the flake gate. Every project the spec matches runs; a repo wanting one names it in its own `CI_E2E_SPEC_CMD`. For targeted manual pushes. |
 | `CI_CHANGED_GLOB` | `^(src\|scripts\|ci\|packages)/.*\.(ts\|tsx\|js\|jsx\|mjs\|cjs)$` | `ci/before-test-push.sh` | which staged paths enter the manifest. It must cover every directory the union ratchet gates (`^(src\|packages)/`), or a gated file's tests never run and it ratchets at a false zero. |
 
 ### Variables the lefthook `rc:` sets

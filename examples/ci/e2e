@@ -17,7 +17,7 @@
 #                      Default `npm run test:e2e:smoke`. A repo without that
 #                      npm script MUST set this or every RUN_ALL commit fails.
 #   CI_SELECTOR      — a Playwright path/grep. When set, e2e.sh runs only that,
-#                      on --project=chromium, and SKIPS spec selection and the
+#                      through CI_E2E_SPEC_CMD, and SKIPS spec selection and the
 #                      flake gate. For targeted manual pushes; leave unset here.
 #
 # Emits coverage/e2e/lcov.info and test-results/results.json (relative to
