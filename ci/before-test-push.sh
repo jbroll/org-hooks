@@ -20,3 +20,8 @@ git diff --cached --name-only --diff-filter=ACMR \
 if [ -x ci/changed-functions ]; then
     ci/changed-functions > ci/.changed-functions || rm -f ci/.changed-functions
 fi
+
+# The e2e baseline's line-remap needs a tree-ish that resolves in the DEVELOPER's
+# repo. The CI worktree is an rsync copy with no .git, so it cannot compute one;
+# this is the only place with history.
+git rev-parse "HEAD^{tree}" > ci/.source-tree

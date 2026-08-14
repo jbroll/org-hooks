@@ -305,6 +305,13 @@ CI_RSYNC_ARGS="--include=ci/.changed-files"
 ```
 
 If the repo also uses `ci/changed-functions`, add `--include=ci/.changed-functions`.
+`ci/e2e-map.sh` reads its baseline anchor from `ci/.source-tree`, written by
+`ci/before-test-push`; add `--include=ci/.source-tree` too, or the anchor never
+reaches the host and the e2e baseline remaps on raw line numbers.
+
+The recorded tree is `HEAD^{tree}` at push time, while the rsync'd content is the
+working tree plus force-included gitignored files; they agree when the tree is
+clean at push (the normal case), and any divergence only costs remap precision.
 
 **Signature of getting this wrong: a green unit job that ran no tests.**
 `ci/test.sh` tests `[ ! -s "$CHANGED" ]`, so a missing manifest is indistinguishable
