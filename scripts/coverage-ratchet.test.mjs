@@ -240,16 +240,20 @@ test("checkOne: default opts (no waiver) preserve strict no-regression", () => {
   assert.match(r.reason, /coverage dropped/);
 });
 
-test("a file baselined at 100% may not slide to the waiver floor", () => {
-  const cur = { linesFound: 100, linesHit: 90 };
-  const result = checkOne("src/a.ts", 1, cur, { floor: 0.9, tolerance: 0.005 });
-  assert.ok(result, "a 10pp drop must be reported even above the waiver");
+test("checkOne: a drop past waiverDrop is reported even above the waiver", () => {
+  // 100% → 91%: above the 0.9 waiver, but a 9pp drop exceeds waiverDrop (0.05).
+  const cur = { linesFound: 100, linesHit: 91 };
+  const result = checkOne("src/a.ts", 1, cur, WAIVER_OPTS);
+  assert.ok(result, "a 9pp drop past waiverDrop must be reported even above the waiver");
   assert.match(result.reason, /coverage dropped/);
 });
 
-test("the waiver still forgives a drop within waiverDrop", () => {
-  const cur = { linesFound: 100, linesHit: 97 };
-  assert.equal(checkOne("src/a.ts", 1, cur, { floor: 0.9, tolerance: 0.005 }), null);
+test("checkOne: the waiver forgives a drop within waiverDrop that tolerance alone would reject", () => {
+  // 100% → 96.25%: above the waiver and within waiverDrop → pass. The 15-line
+  // drop exceeds lineTolerance, so only the waiver — not the ordinary
+  // tolerance/lineTolerance check — forgives it.
+  const cur = { linesFound: 400, linesHit: 385 };
+  assert.equal(checkOne("src/a.ts", 1, cur, WAIVER_OPTS), null);
 });
 
 // ───────────────────────────── ratchetUp ────────────────────────────────────
