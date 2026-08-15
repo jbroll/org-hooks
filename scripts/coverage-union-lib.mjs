@@ -1,10 +1,14 @@
 // Pure helpers for coverage-union-merge.mjs. No fs / no exec — easy to test.
-// Produces a per-line UNION lcov: a line is covered if it is hit in EITHER input.
-// The ratchet (coverage-ratchet.mjs) consumes the recomputed LF/LH unchanged.
+// Produces a UNION lcov: a line is covered, and a branch taken, if EITHER input
+// hit it. The ratchet (coverage-ratchet.mjs) consumes the recomputed LF/LH and
+// BRF/BRH unchanged. Lines and branches run the same pipeline — union, scrub,
+// baseline carry-forward, diff remap — differing only in how a hit is keyed.
 
 import { normalisePath } from "./coverage-ratchet-lib.mjs";
 
 /** @typedef {Map<string, Map<number, number>>} FileLines  canonicalSF -> (lineNo -> hits) */
+/** @typedef {Map<string, Map<string, number>>} FileBranches  canonicalSF -> ("line,block,branch" -> taken) */
+/** @typedef {FileLines|FileBranches} FileHits  either keying; the union/merge steps are generic over it */
 
 /**
  * Parse an lcov into canonicalSF -> Map(lineNo -> maxHits). SF paths are
@@ -44,13 +48,67 @@ export function parseLcovDA(text, srcRoot) {
 }
 
 /**
- * Per-line OR of two parsed lcovs. Files in either input appear in the result.
- * @param {FileLines} a
- * @param {FileLines} b
- * @returns {FileLines}
+ * Parse an lcov's `BRDA:<line>,<block>,<branch>,<taken>` records into
+ * canonicalSF -> Map("line,block,branch" -> taken). `-` (branch never
+ * evaluated) reads as untaken. Repeated records collapse via max, as with DA.
+ * The key keeps the line number first so remapBaselineBranches can shift it.
+ * @param {string} text
+ * @param {string} srcRoot
+ * @returns {FileBranches}
+ */
+export function parseLcovBRDA(text, srcRoot) {
+  /** @type {FileBranches} */
+  const files = new Map();
+  /** @type {Map<string, number>|null} */
+  let branches = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("SF:")) {
+      const sf = normalisePath(line.slice(3).trim(), srcRoot);
+      branches = files.get(sf);
+      if (!branches) {
+        branches = new Map();
+        files.set(sf, branches);
+      }
+    } else if (line.startsWith("BRDA:") && branches) {
+      const parts = line.slice(5).split(",");
+      if (parts.length < 4) continue;
+      const key = parts.slice(0, 3).join(",");
+      const taken = parts[3] === "-" ? 0 : Number(parts[3]);
+      if (Number.isFinite(taken)) {
+        branches.set(key, Math.max(branches.get(key) ?? 0, taken));
+      }
+    } else if (line === "end_of_record") {
+      branches = null;
+    }
+  }
+  return files;
+}
+
+/**
+ * Retain only the files present in `keep`. The incidental-unit scrub decides
+ * per file on LINE coverage; its verdict has to apply to that file's branches
+ * too, or a dropped file's uncovered BRDA entries stay behind and inflate BRF.
+ * @template {FileHits} T
+ * @param {T} hits
+ * @param {FileHits} keep
+ * @returns {T}
+ */
+export function keepFiles(hits, keep) {
+  const out = new Map();
+  for (const [sf, v] of hits) if (keep.has(sf)) out.set(sf, new Map(v));
+  return /** @type {T} */ (out);
+}
+
+/**
+ * Per-key OR of two parsed lcovs. Files in either input appear in the result.
+ * Generic over the key: line numbers for DA, "line,block,branch" for BRDA.
+ * @template {FileHits} T
+ * @param {T} a
+ * @param {T} b
+ * @returns {T}
  */
 export function unionFiles(a, b) {
-  /** @type {FileLines} */
   const out = new Map();
   for (const [sf, lines] of a) out.set(sf, new Map(lines));
   for (const [sf, lines] of b) {
@@ -61,7 +119,7 @@ export function unionFiles(a, b) {
     }
     for (const [n, h] of lines) cur.set(n, Math.max(cur.get(n) ?? 0, h));
   }
-  return out;
+  return /** @type {T} */ (out);
 }
 
 /**
@@ -107,12 +165,16 @@ export function scrubIncidentalUnit(unit, e2eCombined) {
  *   `DA:n,0` entries would otherwise inflate LF and FALSE-DROP it, even though
  *   its fresh unit∪e2e coverage is intact.
  *
- * @param {FileLines} fresh  unit ∪ per-commit e2e
- * @param {FileLines} baseline  persisted full-run e2e
- * @returns {FileLines}
+ * Generic over the key, so branches carry forward on the same terms as lines:
+ * a stale baseline-only BRDA key would inflate BRF exactly as a stale DA key
+ * inflates LF.
+ *
+ * @template {FileHits} T
+ * @param {T} fresh  unit ∪ per-commit e2e
+ * @param {T} baseline  persisted full-run e2e
+ * @returns {T}
  */
 export function mergeBaseline(fresh, baseline) {
-  /** @type {FileLines} */
   const out = new Map();
   for (const [sf, lines] of fresh) out.set(sf, new Map(lines));
   for (const [sf, blines] of baseline) {
@@ -128,16 +190,31 @@ export function mergeBaseline(fresh, baseline) {
       }
     }
   }
-  return out;
+  return /** @type {T} */ (out);
+}
+
+/** @param {string} k  a "line,block,branch" key */
+function branchLine(k) {
+  return Number(k.slice(0, k.indexOf(",")));
+}
+
+/** @param {string} a @param {string} b */
+function byBranchKey(a, b) {
+  const [al, ab, an] = a.split(",").map(Number);
+  const [bl, bb, bn] = b.split(",").map(Number);
+  return al - bl || ab - bb || an - bn;
 }
 
 /**
- * Serialise to a minimal valid lcov (SF/DA/LF/LH/end_of_record). LF/LH are
- * recomputed from the unioned DA set, so they encode the per-line union.
+ * Serialise to a minimal valid lcov (SF/DA/LF/LH/BRDA/BRF/BRH/end_of_record).
+ * LF/LH and BRF/BRH are recomputed from the unioned sets, so they encode the
+ * union rather than either input's totals. A file with no branches emits no
+ * branch records at all.
  * @param {FileLines} files
+ * @param {FileBranches} [branchesByFile]
  * @returns {string}
  */
-export function formatLcov(files) {
+export function formatLcov(files, branchesByFile = new Map()) {
   const out = [];
   for (const sf of [...files.keys()].sort()) {
     const lines = files.get(sf);
@@ -150,6 +227,17 @@ export function formatLcov(files) {
     }
     out.push(`LF:${lines.size}`);
     out.push(`LH:${lh}`);
+    const branches = branchesByFile.get(sf);
+    if (branches?.size) {
+      let brh = 0;
+      for (const k of [...branches.keys()].sort(byBranchKey)) {
+        const taken = branches.get(k);
+        if (taken > 0) brh++;
+        out.push(`BRDA:${k},${taken}`);
+      }
+      out.push(`BRF:${branches.size}`);
+      out.push(`BRH:${brh}`);
+    }
     out.push("end_of_record");
   }
   return out.length ? out.join("\n") + "\n" : "";
@@ -244,6 +332,36 @@ export function remapBaseline(baseline, hunksByFile) {
     for (const [n, h] of blines) {
       const nn = remapLine(n, hunks);
       if (nn !== null) remapped.set(nn, Math.max(remapped.get(nn) ?? 0, h));
+    }
+    out.set(sf, remapped);
+  }
+  return out;
+}
+
+/**
+ * remapBaseline for branch keys: shift the line component of each
+ * "line,block,branch" key, dropping branches whose line was deleted or modified
+ * so changed code is measured fresh rather than inheriting its old branch hits.
+ * @param {FileBranches} baseline
+ * @param {Map<string, Hunk[]>} hunksByFile
+ * @returns {FileBranches}
+ */
+export function remapBaselineBranches(baseline, hunksByFile) {
+  /** @type {FileBranches} */
+  const out = new Map();
+  for (const [sf, bbranches] of baseline) {
+    const hunks = hunksByFile.get(sf);
+    if (!hunks) {
+      out.set(sf, new Map(bbranches));
+      continue;
+    }
+    /** @type {Map<string, number>} */
+    const remapped = new Map();
+    for (const [k, taken] of bbranches) {
+      const nn = remapLine(branchLine(k), hunks);
+      if (nn === null) continue;
+      const nk = `${nn}${k.slice(k.indexOf(","))}`;
+      remapped.set(nk, Math.max(remapped.get(nk) ?? 0, taken));
     }
     out.set(sf, remapped);
   }

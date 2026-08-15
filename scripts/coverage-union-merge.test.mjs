@@ -11,6 +11,9 @@ import assert from "node:assert/strict";
 
 import {
   parseLcovDA,
+  parseLcovBRDA,
+  keepFiles,
+  remapBaselineBranches,
   unionFiles,
   mergeBaseline,
   formatLcov,
@@ -436,3 +439,231 @@ function mkdirpFile(dir, rel, content) {
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, content);
 }
+
+// ── branch union (BRDA) ──────────────────────────────────────────────────────
+// Branches flow through the same pipeline as lines: union, incidental-unit
+// scrub, baseline carry-forward and the diff-aware remap.
+
+const UNIT_BR = [
+  "SF:src/B.tsx",
+  "DA:1,1", "DA:2,1",
+  "BRDA:1,0,0,1", "BRDA:1,0,1,0", "BRDA:2,0,0,-", "BRDA:2,0,1,-",
+  "LF:2", "LH:2", "BRF:4", "BRH:1",
+  "end_of_record",
+  "",
+].join("\n");
+
+const E2E_BR = [
+  "SF:localhost-5441/src/B.tsx",
+  "DA:1,1", "DA:2,1",
+  "BRDA:1,0,0,0", "BRDA:1,0,1,3", "BRDA:2,0,0,2", "BRDA:2,0,1,-",
+  "LF:2", "LH:2", "BRF:4", "BRH:2",
+  "end_of_record",
+  "",
+].join("\n");
+
+test("parseLcovBRDA keys by normalised path and reads line,block,branch", () => {
+  const u = parseLcovBRDA(UNIT_BR, "src");
+  assert.ok(u.has("src/B.tsx"));
+  assert.equal(u.get("src/B.tsx").get("1,0,0"), 1);
+  assert.equal(u.get("src/B.tsx").get("1,0,1"), 0);
+  const e = parseLcovBRDA(E2E_BR, "src");
+  assert.ok(e.has("src/B.tsx"), "host prefix stripped");
+  assert.equal(e.get("src/B.tsx").get("1,0,1"), 3);
+});
+
+test("parseLcovBRDA reads an unevaluated branch ('-') as untaken", () => {
+  assert.equal(parseLcovBRDA(UNIT_BR, "src").get("src/B.tsx").get("2,0,0"), 0);
+});
+
+test("parseLcovBRDA keeps the per-branch max across repeated records", () => {
+  const text = [
+    "SF:src/B.tsx", "BRDA:1,0,0,2", "end_of_record",
+    "SF:src/B.tsx", "BRDA:1,0,0,5", "end_of_record", "",
+  ].join("\n");
+  assert.equal(parseLcovBRDA(text, "src").get("src/B.tsx").get("1,0,0"), 5);
+});
+
+test("parseLcovBRDA gives a file with no BRDA an empty branch map", () => {
+  const u = parseLcovBRDA(UNIT, "src");
+  assert.ok(u.has("src/App.tsx"));
+  assert.equal(u.get("src/App.tsx").size, 0);
+});
+
+test("unionFiles ORs branch hits across sources", () => {
+  const merged = unionFiles(parseLcovBRDA(UNIT_BR, "src"), parseLcovBRDA(E2E_BR, "src"));
+  const b = merged.get("src/B.tsx");
+  assert.equal(b.get("1,0,0"), 1); // unit took it
+  assert.equal(b.get("1,0,1"), 3); // e2e took it
+  assert.equal(b.get("2,0,0"), 2); // e2e took it
+  assert.equal(b.get("2,0,1"), 0); // neither did
+});
+
+test("formatLcov emits BRDA/BRF/BRH recomputed from the unioned branch set", () => {
+  const lines = unionFiles(parseLcovDA(UNIT_BR, "src"), parseLcovDA(E2E_BR, "src"));
+  const branches = unionFiles(parseLcovBRDA(UNIT_BR, "src"), parseLcovBRDA(E2E_BR, "src"));
+  const block = formatLcov(lines, branches).split("end_of_record")[0];
+  assert.match(block, /BRDA:1,0,0,1\n/);
+  assert.match(block, /BRDA:2,0,1,0\n/);
+  assert.match(block, /BRF:4\n/);
+  assert.match(block, /BRH:3\n/); // 3 of 4 taken after the union
+});
+
+test("formatLcov emits no branch records for a file with no branches", () => {
+  const lines = parseLcovDA(UNIT, "src");
+  const out = formatLcov(lines, parseLcovBRDA(UNIT, "src"));
+  assert.doesNotMatch(out, /BR/);
+  assert.equal(out, formatLcov(lines), "byte-identical to the lines-only output");
+});
+
+test("mergeBaseline on branches flips untaken ones but imports no stale branch keys", () => {
+  const fresh = parseLcovBRDA(
+    ["SF:src/C.tsx", "BRDA:5,0,0,0", "BRDA:5,0,1,0", "end_of_record", ""].join("\n"), "src");
+  const baseline = parseLcovBRDA(
+    ["SF:src/C.tsx", "BRDA:5,0,0,4", "BRDA:9,0,0,1", "end_of_record", ""].join("\n"), "src");
+  const merged = mergeBaseline(fresh, baseline).get("src/C.tsx");
+  assert.equal(merged.get("5,0,0"), 4, "existing untaken branch flips to taken");
+  assert.equal(merged.get("5,0,1"), 0, "still untaken");
+  assert.equal(merged.has("9,0,0"), false, "stale baseline-only branch must not inflate BRF");
+});
+
+test("mergeBaseline carries a whole branch set for a file absent from fresh", () => {
+  const baseline = parseLcovBRDA(
+    ["SF:src/D.tsx", "BRDA:2,0,0,1", "end_of_record", ""].join("\n"), "src");
+  const merged = mergeBaseline(new Map(), baseline);
+  assert.equal(merged.get("src/D.tsx").get("2,0,0"), 1);
+});
+
+test("keepFiles drops branch entries for files the line scrub removed", () => {
+  const branches = parseLcovBRDA(
+    ["SF:src/A.tsx", "BRDA:1,0,0,0", "end_of_record",
+     "SF:src/B.tsx", "BRDA:1,0,0,1", "end_of_record", ""].join("\n"), "src");
+  const kept = keepFiles(branches, new Map([["src/B.tsx", new Map()]]));
+  assert.equal(kept.has("src/A.tsx"), false);
+  assert.equal(kept.get("src/B.tsx").get("1,0,0"), 1);
+});
+
+test("remapBaselineBranches shifts BRDA line numbers through an insertion", () => {
+  const baseline = parseLcovBRDA(
+    ["SF:src/F.tsx", "BRDA:12,0,0,1", "BRDA:16,0,1,3", "end_of_record", ""].join("\n"), "src");
+  const hunks = parseDiffHunks(
+    ["--- a/src/F.tsx", "+++ b/src/F.tsx", "@@ -11,0 +12,2 @@", "+import a", "+import b", ""].join("\n"),
+    "src",
+  );
+  const b = remapBaselineBranches(baseline, hunks).get("src/F.tsx");
+  assert.equal(b.get("14,0,0"), 1, "old line 12 -> new line 14");
+  assert.equal(b.get("18,0,1"), 3, "old line 16 -> new line 18");
+  assert.equal(b.has("12,0,0"), false, "the old numbering is gone");
+});
+
+test("remapBaselineBranches drops branches on a modified line", () => {
+  const baseline = parseLcovBRDA(
+    ["SF:src/F.tsx", "BRDA:5,0,0,1", "BRDA:20,0,0,1", "end_of_record", ""].join("\n"), "src");
+  const hunks = parseDiffHunks(
+    ["--- a/src/F.tsx", "+++ b/src/F.tsx", "@@ -5,1 +5,1 @@", "-old", "+new", ""].join("\n"),
+    "src",
+  );
+  const b = remapBaselineBranches(baseline, hunks).get("src/F.tsx");
+  assert.equal(b.has("5,0,0"), false, "changed code is measured fresh, never inherited");
+  assert.equal(b.get("20,0,0"), 1, "an unchanged line below keeps its branch");
+});
+
+test("remapBaselineBranches keeps unchanged files verbatim", () => {
+  const baseline = parseLcovBRDA(
+    ["SF:src/G.tsx", "BRDA:3,0,0,1", "BRDA:3,0,1,0", "end_of_record", ""].join("\n"), "src");
+  const b = remapBaselineBranches(baseline, new Map()).get("src/G.tsx");
+  assert.equal(b.get("3,0,0"), 1);
+  assert.equal(b.get("3,0,1"), 0);
+});
+
+test("CLI unions branch data end to end", () => {
+  const dir = mkdtempSync(join(tmpdir(), "union-br-"));
+  try {
+    const unit = join(dir, "unit.info");
+    const e2e = join(dir, "e2e.info");
+    const out = join(dir, "union.info");
+    writeFileSync(unit, UNIT_BR);
+    writeFileSync(e2e, E2E_BR);
+    execFileSync("node", [
+      join(__dirname, "coverage-union-merge.mjs"),
+      "--unit", unit, "--e2e", e2e, "--out", out, "--src-root", "src",
+    ]);
+    const block = readFileSync(out, "utf8").split("end_of_record").find((b) => b.includes("src/B.tsx"));
+    assert.match(block, /BRF:4/);
+    assert.match(block, /BRH:3/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI scrubs the branches of an incidental unit file along with its lines", () => {
+  const dir = mkdtempSync(join(tmpdir(), "union-br-scrub-"));
+  try {
+    // Unit loads Boot.tsx without exercising a line of it, and v8 attributes
+    // branches monocart's e2e run never sees. Both must go, or BRF inflates.
+    const unit = join(dir, "unit.info");
+    const e2e = join(dir, "e2e.info");
+    const out = join(dir, "union.info");
+    writeFileSync(unit, [
+      "SF:src/Boot.tsx", "DA:1,0", "DA:2,0",
+      "BRDA:1,0,0,0", "BRDA:1,0,1,0", "BRDA:2,0,0,0",
+      "LF:2", "LH:0", "BRF:3", "BRH:0", "end_of_record", "",
+    ].join("\n"));
+    writeFileSync(e2e, [
+      "SF:src/Boot.tsx", "DA:1,4",
+      "BRDA:1,0,0,4",
+      "LF:1", "LH:1", "BRF:1", "BRH:1", "end_of_record", "",
+    ].join("\n"));
+    execFileSync("node", [
+      join(__dirname, "coverage-union-merge.mjs"),
+      "--unit", unit, "--e2e", e2e, "--out", out, "--src-root", "src",
+    ]);
+    const block = readFileSync(out, "utf8").split("end_of_record").find((b) => b.includes("src/Boot.tsx"));
+    assert.match(block, /BRF:1/, "only e2e's branch survives");
+    assert.match(block, /BRH:1/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI --e2e-baseline-sha remaps baseline BRDA lines through a real git diff", () => {
+  const dir = mkdtempSync(join(tmpdir(), "union-br-git-"));
+  const run = (...a) => execFileSync(a[0], a.slice(1), { cwd: dir, encoding: "utf8" });
+  try {
+    run("git", "init", "-q");
+    run("git", "config", "user.email", "t@t");
+    run("git", "config", "user.name", "t");
+    const body = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p"];
+    mkdirpFile(dir, "src/F.tsx", body.join("\n") + "\n");
+    run("git", "add", "-A");
+    run("git", "commit", "-qm", "old");
+    const sha = run("git", "rev-parse", "HEAD^{tree}").trim();
+    mkdirpFile(dir, "src/F.tsx", "import x\nimport y\n" + body.join("\n") + "\n");
+    const unit = join(dir, "unit.info");
+    const base = join(dir, "base.info");
+    const out = join(dir, "union.info");
+    // Fresh run reaches the file but takes neither branch on new line 14.
+    writeFileSync(unit, [
+      "SF:src/F.tsx", "DA:14,1",
+      "BRDA:14,0,0,0", "BRDA:14,0,1,0",
+      "LF:1", "LH:1", "BRF:2", "BRH:0", "end_of_record", "",
+    ].join("\n"));
+    // The full-run baseline took both, recorded against OLD line 12.
+    writeFileSync(base, [
+      "SF:src/F.tsx", "DA:12,1",
+      "BRDA:12,0,0,3", "BRDA:12,0,1,2",
+      "LF:1", "LH:1", "BRF:2", "BRH:2", "end_of_record", "",
+    ].join("\n"));
+    execFileSync("node", [
+      join(__dirname, "coverage-union-merge.mjs"),
+      "--unit", unit, "--e2e", join(dir, "none.info"),
+      "--e2e-baseline", base, "--e2e-baseline-sha", sha,
+      "--out", out, "--src-root", "src",
+    ], { cwd: dir });
+    const block = readFileSync(out, "utf8").split("end_of_record").find((b) => b.includes("src/F.tsx"));
+    assert.match(block, /BRF:2/);
+    assert.match(block, /BRH:2/, "remapped 12 -> 14, so the baseline's taken branches carry");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

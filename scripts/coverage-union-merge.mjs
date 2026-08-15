@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Merge a unit lcov and an e2e lcov into a per-line UNION lcov.
+// Merge a unit lcov and an e2e lcov into a UNION lcov, per line and per branch.
 //   node coverage-union-merge.mjs --unit <lcov> --e2e <lcov> --out <lcov> \
 //     [--e2e-baseline <lcov>] [--src-root src]
 // A missing input file is treated as empty coverage (does not throw) so the
@@ -26,11 +26,14 @@ import { dirname } from "node:path";
 
 import {
   parseLcovDA,
+  parseLcovBRDA,
+  keepFiles,
   unionFiles,
   mergeBaseline,
   formatLcov,
   parseDiffHunks,
   remapBaseline,
+  remapBaselineBranches,
   scrubIncidentalUnit,
 } from "./coverage-union-lib.mjs";
 
@@ -60,11 +63,18 @@ const e2eBaselineSha = arg("--e2e-baseline-sha", "");
 const outPath = arg("--out", "coverage/union/lcov.info");
 const srcRoot = arg("--src-root", "src");
 
-const unit = parseLcovDA(readOrEmpty(unitPath), srcRoot);
-const e2e = parseLcovDA(readOrEmpty(e2ePath), srcRoot);
+const unitText = readOrEmpty(unitPath);
+const e2eText = readOrEmpty(e2ePath);
+const e2eBaselineText = readOrEmpty(e2eBaselinePath);
+
+const unit = parseLcovDA(unitText, srcRoot);
+const e2e = parseLcovDA(e2eText, srcRoot);
+const unitBranches = parseLcovBRDA(unitText, srcRoot);
+const e2eBranches = parseLcovBRDA(e2eText, srcRoot);
 // Empty when --e2e-baseline is omitted or its file is missing → no-op union,
 // keeping behaviour byte-identical to the unit∪e2e-only case.
-let e2eBaseline = parseLcovDA(readOrEmpty(e2eBaselinePath), srcRoot);
+let e2eBaseline = parseLcovDA(e2eBaselineText, srcRoot);
+let e2eBaselineBranches = parseLcovBRDA(e2eBaselineText, srcRoot);
 if (e2eBaselineSha && e2eBaseline.size) {
   try {
     // -U0 vs the working tree (what the unit/e2e lcovs were measured on).
@@ -72,7 +82,9 @@ if (e2eBaselineSha && e2eBaseline.size) {
       encoding: "utf8",
       maxBuffer: 256 * 1024 * 1024,
     });
-    e2eBaseline = remapBaseline(e2eBaseline, parseDiffHunks(diff, srcRoot));
+    const hunks = parseDiffHunks(diff, srcRoot);
+    e2eBaseline = remapBaseline(e2eBaseline, hunks);
+    e2eBaselineBranches = remapBaselineBranches(e2eBaselineBranches, hunks);
   } catch (e) {
     // git not reachable / SHA not in history (shallow clone, dropped ref) →
     // degrade to the raw baseline rather than crash the gate.
@@ -87,14 +99,21 @@ if (e2eBaselineSha && e2eBaseline.size) {
 // denominator noise. Drop unit's zero-coverage entries for e2e-covered files so
 // their coverage comes from e2e (+baseline) alone.
 const scrubbedUnit = scrubIncidentalUnit(unit, unionFiles(e2e, e2eBaseline));
+// The scrub is decided on lines; its verdict has to reach the same file's
+// branches, or a dropped file's uncovered BRDA entries survive and inflate BRF.
+const scrubbedUnitBranches = keepFiles(unitBranches, scrubbedUnit);
 // Carry the baseline forward onto the fresh union. mergeBaseline (NOT a third
 // plain union) prevents a changed file's shifted lines from importing the
 // baseline's stale old-numbered uncovered DA entries, which inflated LF and
 // false-dropped the file (e.g. mediaService 97%→88% after an edit).
 const merged = mergeBaseline(unionFiles(scrubbedUnit, e2e), e2eBaseline);
+const mergedBranches = mergeBaseline(
+  unionFiles(scrubbedUnitBranches, e2eBranches),
+  e2eBaselineBranches,
+);
 
 mkdirSync(dirname(outPath), { recursive: true });
-writeFileSync(outPath, formatLcov(merged));
+writeFileSync(outPath, formatLcov(merged, mergedBranches));
 const scrubbed = unit.size - scrubbedUnit.size;
 process.stderr.write(
   `union: ${unit.size} unit${scrubbed ? ` (-${scrubbed} incidental)` : ""} + ${e2e.size} e2e + ${e2eBaseline.size} e2e-baseline -> ${merged.size} files -> ${outPath}\n`,
