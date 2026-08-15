@@ -44,11 +44,11 @@ function repo({ lcov = LCOV_HALF, baseline } = {}) {
   return dir;
 }
 
-function run(dir, extra = []) {
+function run(dir, extra = [], env = {}) {
   return spawnSync(
     "bash",
     [SCRIPT, "--lcov", "coverage/lcov.info", "--baseline", "coverage-baseline.json", ...extra],
-    { cwd: dir, encoding: "utf8", env: process.env },
+    { cwd: dir, encoding: "utf8", env: { ...process.env, ...env } },
   );
 }
 
@@ -117,4 +117,76 @@ test("test/spec files are excluded by the default filter", () => {
 test("usage errors exit 2", () => {
   const r = spawnSync("bash", [SCRIPT], { encoding: "utf8" });
   assert.equal(r.status, 2);
+});
+
+// ───────────────────────── branches / check-all opt-ins ─────────────────────
+
+// src/a.ts holds its baseline; src/b.ts, which nothing staged, has halved.
+const LCOV_TWO = [
+  "SF:src/a.ts",
+  "LF:1000",
+  "LH:1000",
+  "end_of_record",
+  "SF:src/b.ts",
+  "LF:1000",
+  "LH:500",
+  "end_of_record",
+  "",
+].join("\n");
+const BASELINE_TWO = `${JSON.stringify({ version: 2, files: { "src/a.ts": 100, "src/b.ts": 100 } })}\n`;
+
+const LCOV_BRANCHES = "SF:src/a.ts\nLF:1000\nLH:1000\nBRF:1000\nBRH:400\nend_of_record\n";
+const BASELINE_BRANCHES = `${JSON.stringify({
+  version: 2,
+  files: { "src/a.ts": { lines: 100, branches: 90 } },
+})}\n`;
+
+test("an unstaged baselined file that regressed passes without --check-all", () => {
+  const dir = repo({ lcov: LCOV_TWO, baseline: BASELINE_TWO });
+  const r = run(dir);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("--check-all fails on an unstaged baselined file that regressed", () => {
+  const dir = repo({ lcov: LCOV_TWO, baseline: BASELINE_TWO });
+  const r = run(dir, ["--check-all"]);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /src\/b\.ts/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("COVERAGE_CHECK_ALL=1 is forwarded to the ratchet", () => {
+  const dir = repo({ lcov: LCOV_TWO, baseline: BASELINE_TWO });
+  const r = run(dir, [], { COVERAGE_CHECK_ALL: "1" });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /src\/b\.ts/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("--check-all still runs when no source file is staged", () => {
+  const dir = repo({ lcov: LCOV_TWO, baseline: BASELINE_TWO });
+  spawnSync("git", ["reset", "-q"], { cwd: dir });
+  assert.equal(run(dir).status, 0);
+  const r = run(dir, ["--check-all"]);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /src\/b\.ts/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("--branches is forwarded to the ratchet", () => {
+  const dir = repo({ lcov: LCOV_BRANCHES, baseline: BASELINE_BRANCHES });
+  assert.equal(run(dir).status, 0, "branches are off by default");
+  const r = run(dir, ["--branches"]);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /branch coverage dropped/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("COVERAGE_BRANCHES=1 is forwarded to the ratchet", () => {
+  const dir = repo({ lcov: LCOV_BRANCHES, baseline: BASELINE_BRANCHES });
+  const r = run(dir, [], { COVERAGE_BRANCHES: "1" });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /branch coverage dropped/);
+  rmSync(dir, { recursive: true, force: true });
 });

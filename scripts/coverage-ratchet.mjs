@@ -4,8 +4,10 @@
 // regresses; rewrites the baseline with current numbers on pass and
 // re-stages it so the improvement travels with the commit.
 //
-// Baseline format (v2): { version: 2, files: { "<path>": <percent> } }
-// where <percent> is line coverage 0-100 with 2 decimals.
+// Baseline format (v2): { version: 2, files: { "<path>": <percent> } } where
+// <percent> is line coverage 0-100 with 2 decimals, or
+// { "<path>": { "lines": <percent>, "branches": <percent> } } when branch
+// coverage is gated too.
 //
 // Per-file rules:
 //   1. File not in baseline: must reach >= FLOOR (covers both brand-new files
@@ -36,6 +38,9 @@
 //   --waiver-drop N   0–1; bounds --regression-waiver — past this many
 //                     percentage points below baseline it is a regression
 //                     regardless (default: $COVERAGE_REGRESSION_WAIVER_DROP or 0.05)
+//   --branches        also gate branch coverage (default: $COVERAGE_BRANCHES=1; off)
+//   --check-all       gate every baseline entry present in the lcov, not only the
+//                     staged files (default: $COVERAGE_CHECK_ALL=1; off)
 //   --src-root DIR    strip path prefix up to this dir name when normalising lcov
 //                     SF: paths (default: src)
 //   --seed            HARD RESET: write current lcov to baseline unconditionally,
@@ -53,6 +58,7 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import {
+  branchPct,
   checkOne,
   fmtPct,
   formatBaseline,
@@ -77,6 +83,8 @@ let lineTolerance = Number(process.env.COVERAGE_LINE_TOLERANCE ?? "5");
 let srcRoot = "src";
 let seedMode = false;
 let reseedMode = false;
+let branches = process.env.COVERAGE_BRANCHES === "1";
+let checkAll = process.env.COVERAGE_CHECK_ALL === "1";
 /** @type {string[]} */
 const stagedFiles = [];
 
@@ -92,11 +100,13 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (arg === "--src-root") srcRoot = process.argv[++i];
   else if (arg === "--seed") seedMode = true;
   else if (arg === "--reseed") reseedMode = true;
+  else if (arg === "--branches") branches = true;
+  else if (arg === "--check-all") checkAll = true;
   else if (!arg.startsWith("--")) stagedFiles.push(arg);
 }
 
 const writeMode = seedMode || reseedMode;
-if (!writeMode && stagedFiles.length === 0) process.exit(0);
+if (!writeMode && !checkAll && stagedFiles.length === 0) process.exit(0);
 
 // ---------------------------------------------------------------------------
 // Baseline I/O
@@ -106,13 +116,15 @@ const baselineExists = fs.existsSync(baselinePath);
 // Skip parsing in --seed mode — we're about to overwrite, and the existing file
 // may be in a legacy format we no longer read. --reseed must parse it: it
 // preserves the existing high-water marks.
-/** @type {Record<string, number>} */
+/** @type {Record<string, import("./coverage-ratchet-lib.mjs").BaselineEntry>} */
 const baseline =
   baselineExists && !seedMode
     ? parseBaseline(JSON.parse(fs.readFileSync(baselinePath, "utf8")), srcRoot)
     : {};
 
-function writeBaseline(/** @type {Record<string, number>} */ files) {
+function writeBaseline(
+  /** @type {Record<string, import("./coverage-ratchet-lib.mjs").BaselineEntry>} */ files,
+) {
   fs.writeFileSync(baselinePath, formatBaseline(files));
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -162,7 +174,7 @@ const lcov = parseLcov(fs.readFileSync(lcovPath, "utf8"), srcRoot);
 // ---------------------------------------------------------------------------
 
 if (reseedMode) {
-  const next = reseedBaseline(baseline, lcov);
+  const next = reseedBaseline(baseline, lcov, { branches });
   writeBaseline(next);
   console.log(
     `coverage ratchet --reseed: wrote ${Object.keys(next).length} files to ${baselinePath} (high-water marks preserved)`,
@@ -171,7 +183,7 @@ if (reseedMode) {
 }
 
 if (seedMode || !baselineExists) {
-  const next = ratchetUp({}, lcov);
+  const next = ratchetUp({}, lcov, { branches });
   writeBaseline(next);
   const label = seedMode ? "--seed" : "auto-seed (no baseline)";
   console.log(`coverage ratchet ${label}: wrote ${Object.keys(next).length} files to ${baselinePath}`);
@@ -182,15 +194,24 @@ if (seedMode || !baselineExists) {
 // Main
 // ---------------------------------------------------------------------------
 
+// A baselined file absent from the lcov is a regression to 0 when it is staged —
+// the commit's own tests no longer reach it. In check-all mode it is skipped
+// instead: a repo running a partial suite would otherwise fail on every file
+// that run never loaded.
+const alsoCheck = checkAll
+  ? Object.keys(baseline).filter((f) => lcov[f] && !stagedFiles.includes(f))
+  : [];
+
 /** @type {{ file: string; reason: string }[]} */
 const failures = [];
-for (const file of stagedFiles) {
+for (const file of [...stagedFiles, ...alsoCheck]) {
   const fail = checkOne(file, baseline[file], lcov[file], {
     floor,
     tolerance,
     regressionWaiver,
     waiverDrop,
     lineTolerance,
+    branches,
   });
   if (fail) failures.push(fail);
 }
@@ -267,7 +288,15 @@ if (failures.length > 0) {
 const nextBaseline = { ...baseline };
 for (const f of stagedFiles) {
   const m = lcov[f];
-  if (m) nextBaseline[f] = Math.max(nextBaseline[f] ?? 0, pct(m));
+  if (!m) continue;
+  const prev = nextBaseline[f];
+  nextBaseline[f] = {
+    lines: Math.max(prev?.lines ?? 0, pct(m)),
+    branches:
+      branches && m.branchesFound > 0
+        ? Math.max(prev?.branches ?? 0, branchPct(m))
+        : prev?.branches,
+  };
 }
 writeBaseline(nextBaseline);
 
