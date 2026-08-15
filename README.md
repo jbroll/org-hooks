@@ -565,6 +565,10 @@ A repo adopting `profiles/sci-tiered.yml` also supplies the four `ci/` files —
 templates in `examples/ci/`, contract and checklist in
 [The `ci/` contract required by `profiles/sci-tiered.yml`](#the-ci-contract-required-by-profilessci-tieredyml).
 
+## Outstanding work
+
+[`docs/backlog.md`](docs/backlog.md).
+
 ## Tagging
 
 Consumers pin a `ref:`. Cut a tag after any change:
