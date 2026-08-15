@@ -39,6 +39,8 @@
 //                     percentage points below baseline it is a regression
 //                     regardless (default: $COVERAGE_REGRESSION_WAIVER_DROP or 0.05)
 //   --branches        also gate branch coverage (default: $COVERAGE_BRANCHES=1; off)
+//   --branch-tolerance N  absolute branch-count slack, the branch counterpart of
+//                     --line-tolerance (default: $COVERAGE_BRANCH_TOLERANCE or 2)
 //   --check-all       gate every baseline entry present in the lcov, not only the
 //                     staged files (default: $COVERAGE_CHECK_ALL=1; off)
 //   --src-root DIR    strip path prefix up to this dir name when normalising lcov
@@ -80,6 +82,7 @@ let tolerance = Number(process.env.COVERAGE_TOLERANCE ?? "0.005");
 let regressionWaiver = Number(process.env.COVERAGE_REGRESSION_WAIVER ?? "0.90");
 let waiverDrop = Number(process.env.COVERAGE_REGRESSION_WAIVER_DROP ?? "0.05");
 let lineTolerance = Number(process.env.COVERAGE_LINE_TOLERANCE ?? "5");
+let branchTolerance = Number(process.env.COVERAGE_BRANCH_TOLERANCE ?? "2");
 let srcRoot = "src";
 let seedMode = false;
 let reseedMode = false;
@@ -97,6 +100,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (arg === "--regression-waiver") regressionWaiver = Number(process.argv[++i]);
   else if (arg === "--waiver-drop") waiverDrop = Number(process.argv[++i]);
   else if (arg === "--line-tolerance") lineTolerance = Number(process.argv[++i]);
+  else if (arg === "--branch-tolerance") branchTolerance = Number(process.argv[++i]);
   else if (arg === "--src-root") srcRoot = process.argv[++i];
   else if (arg === "--seed") seedMode = true;
   else if (arg === "--reseed") reseedMode = true;
@@ -211,6 +215,7 @@ for (const file of [...stagedFiles, ...alsoCheck]) {
     regressionWaiver,
     waiverDrop,
     lineTolerance,
+    branchTolerance,
     branches,
   });
   if (fail) failures.push(fail);

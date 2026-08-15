@@ -168,23 +168,26 @@ export function formatBaseline(files) {
  * @param {number} curPct
  * @param {number} found
  * @param {number} hit
- * @param {{ tolerance: number; regressionWaiver: number; waiverDrop: number; lineTolerance: number }} opts
+ * @param {{ tolerance: number; regressionWaiver: number; waiverDrop: number }} opts
+ * @param {number} absSlack  absolute covered-count slack, in this metric's own units
  * @param {string} label
  * @param {string} unit
  * @returns {string|null}
  */
-function metricRegression(prevPct, curPct, found, hit, opts, label, unit) {
-  const { tolerance, regressionWaiver, waiverDrop, lineTolerance } = opts;
+function metricRegression(prevPct, curPct, found, hit, opts, absSlack, label, unit) {
+  const { tolerance, regressionWaiver, waiverDrop } = opts;
   // A baselined file at/above the waiver absorbs small drops without churn, but
   // the waiver is not a floor to slide to: past waiverDrop it is a regression.
-  if (curPct >= regressionWaiver && prevPct - curPct <= waiverDrop) return null;
+  // The epsilon keeps the bound inclusive: 1 - 0.95 is 0.050000000000000044, so
+  // an exact waiverDrop-sized drop would otherwise fail on float representation.
+  if (curPct >= regressionWaiver && prevPct - curPct <= waiverDrop + 1e-9) return null;
   // Pass within EITHER the pct tolerance OR a small absolute covered-count drop.
   // The baseline stores only a %, so derive the implied prior hit count from the
-  // CURRENT total (stable for an incidental touch); a sub-lineTolerance drop
-  // is e2e-instrument noise, not a regression.
+  // CURRENT total (stable for an incidental touch); a sub-slack drop is
+  // instrument noise, not a regression.
   const drop = prevPct * found - hit;
-  if (curPct < prevPct - tolerance && drop > lineTolerance)
-    return `${label} dropped: ${fmtPct(prevPct)} → ${fmtPct(curPct)} (tolerance ${(tolerance * 100).toFixed(2)} pp / ${lineTolerance} ${unit}; waiver ≥ ${fmtPct(regressionWaiver)})`;
+  if (curPct < prevPct - tolerance && drop > absSlack)
+    return `${label} dropped: ${fmtPct(prevPct)} → ${fmtPct(curPct)} (tolerance ${(tolerance * 100).toFixed(2)} pp / ${absSlack} ${unit}; waiver ≥ ${fmtPct(regressionWaiver)})`;
   return null;
 }
 
@@ -201,6 +204,11 @@ function metricRegression(prevPct, curPct, found, hit, opts, label, unit) {
  *                       drop from baseline stays within waiverDrop (a well-covered
  *                       file shouldn't fail the build over one new error-path
  *                       line; that just pushes toward excludes). Defaults to 1
+ *   branchTolerance   — lineTolerance's counterpart for branches, and much
+ *                       smaller because a file has far fewer branches than
+ *                       lines: at 5, a file with five branches cannot drop far
+ *                       enough to fail, so the gate would never reach most
+ *                       files. Default 2.
  *   branches          — also gate branch coverage against the entry's branches
  *                       figure. Off by default. An entry with no branches figure
  *                       records one and passes, per the ratchet's bootstrap rule.
@@ -225,6 +233,7 @@ export function checkOne(
     regressionWaiver = 1,
     waiverDrop = 0.05,
     lineTolerance = 5,
+    branchTolerance = 2,
     branches = false,
   },
 ) {
@@ -245,15 +254,16 @@ export function checkOne(
   }
   if (!cur)
     return { file, reason: "previously measured but absent from current lcov — regressed to 0" };
-  const opts = { tolerance, regressionWaiver, waiverDrop, lineTolerance };
+  const opts = { tolerance, regressionWaiver, waiverDrop };
   const lineReason = metricRegression(
-    prevEntry.lines, pct(cur), cur.linesFound, cur.linesHit, opts, "coverage", "lines",
+    prevEntry.lines, pct(cur), cur.linesFound, cur.linesHit, opts, lineTolerance,
+    "coverage", "lines",
   );
   if (lineReason) return { file, reason: lineReason };
   if (!branches || prevEntry.branches === undefined) return null;
   const branchReason = metricRegression(
     prevEntry.branches, branchPct(cur), cur.branchesFound, cur.branchesHit, opts,
-    "branch coverage", "branches",
+    branchTolerance, "branch coverage", "branches",
   );
   return branchReason ? { file, reason: branchReason } : null;
 }

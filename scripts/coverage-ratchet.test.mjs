@@ -381,6 +381,29 @@ test("checkOne: a branch drop past waiverDrop fails even above the waiver", () =
   assert.match(r.reason, /branch coverage dropped/);
 });
 
+test("checkOne: the absolute branch slack is sized for branches, not lines", () => {
+  // 5 branches, 3 taken, all lost. The largest possible drop is 3 counts, so a
+  // 5-line slack could never catch it — most files have few enough branches
+  // that the line figure makes the branch gate unreachable.
+  const cur = { linesFound: 40, linesHit: 40, branchesFound: 5, branchesHit: 0 };
+  const r = checkOne("src/a.ts", { lines: 1, branches: 0.6 }, cur, BRANCH_OPTS);
+  assert.match(r.reason, /branch coverage dropped/);
+});
+
+test("checkOne: a one-branch wobble is still absorbed", () => {
+  const cur = { linesFound: 40, linesHit: 40, branchesFound: 38, branchesHit: 32 };
+  assert.equal(checkOne("src/a.ts", { lines: 1, branches: 0.8684 }, cur, BRANCH_OPTS), null);
+});
+
+test("checkOne: branchTolerance is configurable and does not touch the line slack", () => {
+  const cur = { linesFound: 1000, linesHit: 996, branchesFound: 5, branchesHit: 0 };
+  assert.equal(
+    checkOne("src/a.ts", { lines: 1, branches: 0.6 }, cur, { ...BRANCH_OPTS, branchTolerance: 9 }),
+    null,
+    "a wide branch slack forgives the branch drop and leaves the 4-line drop inside lineTolerance",
+  );
+});
+
 test("checkOne: a line regression is reported before the branch one", () => {
   const cur = { linesFound: 1000, linesHit: 500, branchesFound: 1000, branchesHit: 400 };
   const r = checkOne("src/a.ts", { lines: 1, branches: 0.9 }, cur, BRANCH_OPTS);
