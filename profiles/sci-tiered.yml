@@ -31,10 +31,11 @@
 #     2. tier1-static  — group(parallel: true): the slow local static analysis
 #        (typecheck, knip, dpdm circular; mypy/vulture/deptry/pytest; detekt).
 #        Runs only if tier1-instant passed.
-#     3. tier2-gpu     — group(parallel: true): a single coverage-union job that
+#     3. tier2-gpu     — group(parallel: true): a coverage-union job that
 #        sci-dispatches BOTH the unit and e2e GPU runs in parallel, then merges
-#        their lcovs per-line and runs ONE union ratchet. Runs ONLY if both local
-#        tiers fully passed. A 0.02s lint/type failure therefore never dispatches
+#        their lcovs per-line and runs ONE union ratchet, plus glob-gated jobs for
+#        a repo's Python and Kotlin suites. Runs ONLY if both local tiers fully
+#        passed. A 0.02s lint/type failure therefore never dispatches
 #        (or waits on) a ~2-min GPU job.
 #   Each group runs all its jobs even if one fails (so you see every problem in
 #   that tier), but a nonzero group exit breaks the pipe → later tiers skipped.
@@ -67,9 +68,8 @@
 # ruff, uv, ktlint, detekt. A Python project pins mypy and pytest in its own dev
 # group — they run from the project env, not an isolated `uv tool run`, so
 # third-party imports type-check and the suite sees its dependencies. Kotlin
-# compile/test are still absent: they need Gradle and, for Android, the SDK, so
-# they belong in a build-host dispatch alongside tier2 rather than in a local
-# tier.
+# compile/test run in tier2 against a plain-JVM `:core` module, which needs only
+# the JDK; an Android `:app` build needs the SDK and stays out of the gate.
 
 pre-commit:
   # Fail-fast across tiers: any tier1 failure breaks the pipe → tier2 skipped.
@@ -142,8 +142,8 @@ pre-commit:
             run: '"${ORG_HOOKS}/scripts/hygiene.sh" test-size-cap {staged_files}'
           # Kotlin format+lint+hygiene (glob-gated: inert in repos with no .kt).
           # Host tools ktlint/detekt (JDK 17+); detekt is in tier1-static below.
-          # Mirrors profiles/kotlin.yml. Gradle compile/test needs the SDK → stays
-          # in the consumer lefthook / build-host dispatch, not here.
+          # Mirrors profiles/kotlin.yml. Gradle compile/test is tier2's
+          # kotlin-core-test, not here — it is far too slow for an instant tier.
           - name: kt-format-lint
             glob: "*.{kt,kts}"
             run: ktlint --format --relative {staged_files}
@@ -228,7 +228,10 @@ pre-commit:
           # + e2e globs. lefthook globs are static config (they can't read env),
           # so a repo needing different scoping changes them here.
           - name: coverage-union
-            glob: "{src,packages,backend,scripts,ci}/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}"
+            glob:
+              - "{src,packages,backend,scripts,ci}/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}"
+              - "*.{ts,tsx,js,jsx,mjs,cjs,json}"
+              - "{host-bridge,android-bridge}/**"
             run: |
               SCI=${SCI_BIN:-/home/john/src/simple-ci/sci}
               WT=${SCI_WT:-$(basename "$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)")}
@@ -312,6 +315,12 @@ pre-commit:
               else
                 npm run test:coverage && npm run test:e2e
               fi
+          - name: python-suite
+            glob: "host-bridge/**"
+            run: npm run check:python
+          - name: kotlin-core-test
+            glob: "android-bridge/**"
+            run: cd android-bridge && ./gradlew --console=plain :core:test
 
 # Linear-history guard: protected branches update by fast-forward merge only
 # (no merge commits, no PRs). Fast-forward merges create no commit so they pass;
