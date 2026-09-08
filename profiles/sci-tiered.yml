@@ -278,35 +278,27 @@ pre-commit:
                 E2E_LCOV=${COVERAGE_E2E_LCOV:-coverage/e2e/lcov.info}
                 # Full-run e2e lcov persisted on the CI host by ci/e2e-map. WT is
                 # the repo name (== CI_REPO on the host, since push targets are
-                # ${WT}/ci/...), so it keys the same ~/ci-flake/<repo>-* path.
+                # ${WT}/ci/...), so it keys the same baseline the server serves.
                 E2E_BASELINE_LCOV=${COVERAGE_E2E_BASELINE_LCOV:-coverage/e2e-fullrun/lcov.info}
-                # Reads go over a shell-capable login, not the push identity:
-                # that key is forced to the CI receive script and can serve
-                # neither scp nor sftp.
-                read_host=$("$SCI" readhost) || read_host=""
-                wt_u=$("$SCI" path "$job_u") || wt_u=""
-                wt_e=$("$SCI" path "$job_e") || wt_e=""
-                if [ -z "$read_host" ] || [ -z "$wt_u" ] || [ -z "$wt_e" ]; then
-                  echo "tier2: both suites passed, but the CI host for their lcovs is unresolved (host='$read_host' unit='$wt_u' e2e='$wt_e')"
-                  echo "tier2: refusing to grade stale coverage"; exit 1
-                fi
-                # Removed before the fetch so a failed copy cannot leave the
+                # Removed before the fetch so a failed one cannot leave the
                 # previous run's lcov for the ratchet to grade as fresh.
-                rm -f "$LCOV" "$E2E_LCOV"
-                mkdir -p "$(dirname "$LCOV")" "$(dirname "$E2E_LCOV")"
-                scp -q "$read_host:$wt_u/$LCOV" "$LCOV" || {
-                  echo "tier2: unit lcov never arrived from $read_host:$wt_u/$LCOV"; exit 1; }
-                scp -q "$read_host:$wt_e/$E2E_LCOV" "$E2E_LCOV" || {
-                  echo "tier2: e2e lcov never arrived from $read_host:$wt_e/$E2E_LCOV"; exit 1; }
-                # ssh+cat (not scp): OpenSSH 9+ scp uses SFTP, which does NOT
-                # shell-expand the remote $HOME; cat over ssh does. Missing file
-                # -> empty output -> merge treats it as no-op (graceful degrade).
-                mkdir -p "$(dirname "$E2E_BASELINE_LCOV")"; ssh "$read_host" "cat \$HOME/ci-flake/${WT}-e2e-fullrun.lcov" > "$E2E_BASELINE_LCOV" 2>/dev/null || true
-                # Commit the baseline was measured on. Lets the merge remap the
-                # baseline's line numbers onto current source (git diff), so a
-                # line-shifting edit since then stays coverage-neutral. Missing
-                # -> empty -> merge uses raw line numbers (prior behaviour).
-                E2E_BASELINE_SHA=$(ssh "$read_host" "cat \$HOME/ci-flake/${WT}-e2e-fullrun.sha" 2>/dev/null | tr -d '[:space:]' || true)
+                rm -f "$LCOV" "$E2E_LCOV" "$E2E_BASELINE_LCOV"
+                mkdir -p "$(dirname "$LCOV")" "$(dirname "$E2E_LCOV")" "$(dirname "$E2E_BASELINE_LCOV")"
+                "$SCI" artifact "$job_u" "$LCOV" > "$LCOV.part" || {
+                  rm -f "$LCOV.part"; echo "tier2: unit lcov never arrived from job $job_u ($LCOV)"; exit 1; }
+                mv "$LCOV.part" "$LCOV"
+                "$SCI" artifact "$job_e" "$E2E_LCOV" > "$E2E_LCOV.part" || {
+                  rm -f "$E2E_LCOV.part"; echo "tier2: e2e lcov never arrived from job $job_e ($E2E_LCOV)"; exit 1; }
+                mv "$E2E_LCOV.part" "$E2E_LCOV"
+                # The baseline carries the full-run e2e attribution a TIA-selected
+                # spec subset cannot; graded without it, every file looks short of
+                # the e2e coverage it has. It arrives with the source tree it was
+                # measured against, so the merge can remap its line numbers onto
+                # current source and a line-shifting edit stays coverage-neutral.
+                baseline=$("$SCI" baseline "$WT") || {
+                  echo "tier2: no full-run e2e coverage baseline for $WT — run ci/e2e-map on the CI host"; exit 1; }
+                printf '%s' "$baseline" | jq -r '.lcov' > "$E2E_BASELINE_LCOV"
+                E2E_BASELINE_SHA=$(printf '%s' "$baseline" | jq -r '.tree')
 
                 UNION_LCOV=${COVERAGE_UNION_LCOV:-coverage/union/lcov.info}
                 UNION_BASELINE=${COVERAGE_UNION_BASELINE:-coverage-union-baseline.json}

@@ -76,7 +76,7 @@ the consumer's `rc:`), never config overrides:
 | `DPDM_CIRCULAR` | `circular:1` | ts-circular exit policy; set `circular:0` for warn-only in repos with known cycles |
 | `SCI_WT` | derived | CI queue name; **not needed** — derived from the git common dir so all worktrees of a repo resolve to the repo dir name |
 | `SCI_BIN` | `/home/john/src/simple-ci/sci` | simple-ci binary; falls back to `npm run test:coverage`/`test:e2e` if absent |
-| `COVERAGE_E2E_BASELINE_LCOV` | `coverage/e2e-fullrun/lcov.info` | local path the persisted full-run e2e lcov is scp'd to and fed to the union merge as `--e2e-baseline` (full-e2e carry-forward, below) |
+| `COVERAGE_E2E_BASELINE_LCOV` | `coverage/e2e-fullrun/lcov.info` | local path the persisted full-run e2e lcov is fetched to and fed to the union merge as `--e2e-baseline` (full-e2e carry-forward, below) |
 
 **Python projects in a subdirectory.** mypy, pytest and deptry resolve config,
 dependencies and import roots from the directory they start in, which in a
@@ -98,10 +98,12 @@ e2e spec subset, so a source file whose real e2e coverage comes from an
 *unselected* spec (e.g. a `mediaService` that maps to no spec) is absent from the
 per-commit e2e lcov and would **false-drop** the union ratchet. To prevent that,
 `ci/e2e-map.sh` persists the full e2e lcov on the CI host (green-run only, under
-an `flock`) at `~/ci-flake/<repo>-e2e-fullrun.lcov`. The `coverage-union` job
-scp's it to `COVERAGE_E2E_BASELINE_LCOV` and unions it into the per-commit merge
-via `coverage-union-merge.mjs --e2e-baseline`. If the file is absent the scp/merge
-silently omit it and behave exactly as before.
+an `flock`) in the CI service user's `ci-flake` directory. The `coverage-union`
+job fetches it with `sci baseline <repo>`, writes it to
+`COVERAGE_E2E_BASELINE_LCOV`, and unions it into the per-commit merge via
+`coverage-union-merge.mjs --e2e-baseline`. A repo with no baseline yet fails the
+stage rather than grading every file short of its real e2e coverage; run
+`ci/e2e-map` on the CI host once to seed it.
 
 Soundness: the baseline is keyed by the line numbers from the **last green
 `ci/e2e-map`**, so for a file changed since then its e2e attribution is
@@ -123,10 +125,11 @@ The coverage ratchet runs at the end of each sci command — after `sci-run.sh` 
 retrieved the lcov from the CI host — so it always checks coverage from the current
 commit; the staged-file filtering lives in the shared `scripts/ratchet-staged.sh`.
 
-Retrieval uses `sci readhost`, not `sci host`: the push identity's key is forced to
-simple-ci's receive script and can run neither `scp` nor `sftp`. The local lcov is
-deleted before the copy and a failed copy fails the stage, so the ratchet can never
-grade the previous run's coverage.
+Retrieval goes over the job API — `sci artifact <job> <path>` and `sci baseline
+<repo>` — not over ssh: the CI server already runs as the user that owns the job
+worktrees and the baseline, and no login on the build host can read both. The
+local lcov is deleted before the fetch and a failed fetch fails the stage, so the
+ratchet can never grade the previous run's coverage.
 
 ## The `ci/` contract required by `profiles/sci-tiered.yml`
 
@@ -180,7 +183,7 @@ they come from the repo's `rc:` file, not from a `ci/` shim.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `COVERAGE_LCOV` | `coverage/lcov.info` | unit lcov; used as **both** the remote source and the local destination of the `scp`, so it names the same repo-relative path on both sides |
+| `COVERAGE_LCOV` | `coverage/lcov.info` | unit lcov; used as **both** the path fetched from the job worktree and the local destination, so it names the same repo-relative path on both sides |
 | `COVERAGE_E2E_LCOV` | `coverage/e2e/lcov.info` | E2E lcov, same on both sides |
 | `COVERAGE_E2E_BASELINE_LCOV` | `coverage/e2e-fullrun/lcov.info` | local landing path for the persisted full-run e2e lcov (see full-run carry-forward above) |
 | `COVERAGE_UNION_LCOV` | `coverage/union/lcov.info` | merged per-line union, written locally |
@@ -276,7 +279,7 @@ read it on the CI host. Two things must both be true:
 
 **It must be gitignored.** `hygiene.sh fully-staged` (tier 0) rejects any untracked
 non-ignored file, so an unignored manifest fails every commit. Ignore
-`coverage/` too — the tier-2 job `scp`s lcovs into it locally, and the next commit's
+`coverage/` too — the tier-2 job fetches lcovs into it locally, and the next commit's
 `fully-staged` would trip on them.
 
 **It must be force-included in the rsync.** `sci push` runs
@@ -378,9 +381,9 @@ line, `#` comments ignored. Every entry should carry a reason.
 ### Adoption checklist
 
 1. Clone the repo on the build host at `~/ci-workspace/<repo>`, and confirm
-   `sci host` and `sci readhost` both resolve from your machine. The second is the
-   shell-capable login the coverage lcovs are copied back over; without it tier 2
-   fails rather than grading the previous run's coverage.
+   `sci host` resolves from your machine. Seed the e2e coverage baseline with one
+   `ci/e2e-map` run on the CI host; without it tier 2 fails rather than grading
+   every file short of its real e2e coverage.
 2. Copy `examples/lefthook.stub.yml` to `lefthook.yml`, list **only**
    `profiles/sci-tiered.yml` under `configs:`, and declare no `pre-commit:` block.
 3. Create the `rc:` file: export `ORG_HOOKS`, then `. "$ORG_HOOKS/rc.sh"`.
@@ -456,7 +459,7 @@ The ratchet is invoked from `profiles/sci.yml` (via `scripts/ratchet-staged.sh`)
 not as a separate lefthook command. This
 is intentional: lefthook v2 has no command-level ordering that survives `parallel: true`,
 so a separate command would race the test job and check stale lcov.
-By inlining the ratchet after the `scp` sync, ordering is enforced by the shell.
+By inlining the ratchet after the lcov fetch, ordering is enforced by the shell.
 
 Two independent ratchets, one per sci command:
 

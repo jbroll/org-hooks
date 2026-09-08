@@ -28,16 +28,12 @@ case "$1" in
   wait) echo "wait streamed log"; exit "\${FAKE_WAIT_RC:-0}";;
   kill) ;;
   host) echo "\${FAKE_HOST:-}";;
-  readhost) echo "\${FAKE_READ_HOST:-}";;
   path) echo "\${FAKE_JOB_PATH:-}";;
+  artifact) [ -n "\${FAKE_ARTIFACT_ROOT:-}" ] && exec cat "\${FAKE_ARTIFACT_ROOT}/$3"; exit 22;;
 esac
 `,
   );
   chmodSync(sci, 0o755);
-  // scp stub for --lcov retrieval: "scp -q host:src dst" -> cp src dst
-  const scp = join(bin, "scp");
-  writeFileSync(scp, `#!/usr/bin/env bash\ncp "\${2#*:}" "$3"\n`);
-  chmodSync(scp, 0o755);
   return { dir, bin, sci, log };
 }
 
@@ -118,9 +114,8 @@ test("--before with a missing hook proceeds (convention hook is optional)", () =
   rmSync(s.dir, { recursive: true, force: true });
 });
 
-test("--lcov retrieves the job's lcov from the CI host after wait", () => {
+test("--lcov retrieves the job's lcov over `sci artifact` after wait", () => {
   const s = sandbox();
-  // The "remote" job worktree with an lcov the scp stub can copy locally.
   const remote = join(s.dir, "remote-wt");
   mkdirSync(join(remote, "coverage"), { recursive: true });
   writeFileSync(join(remote, "coverage/lcov.info"), "SF:src/a.ts\nDA:1,1\nend_of_record\n");
@@ -128,54 +123,28 @@ test("--lcov retrieves the job's lcov from the CI host after wait", () => {
   mkdirSync(cwd);
   const r = run(["--lcov", "coverage/lcov.info", "ci/test"], {
     cwd,
-    env: {
-      SCI_BIN: s.sci,
-      SCI_WT: "myrepo",
-      FAKE_READ_HOST: "ci-read-host",
-      FAKE_JOB_PATH: remote,
-      PATH: `${s.bin}:${process.env.PATH}`,
-    },
+    env: { SCI_BIN: s.sci, SCI_WT: "myrepo", FAKE_ARTIFACT_ROOT: remote },
   });
   assert.equal(r.status, 0, r.stderr);
   assert.match(readFileSync(join(cwd, "coverage/lcov.info"), "utf8"), /SF:src\/a\.ts/);
-  assert.match(readFileSync(s.log, "utf8"), /readhost/);
+  assert.match(readFileSync(s.log, "utf8"), /artifact job-abc123 coverage\/lcov\.info/);
   rmSync(s.dir, { recursive: true, force: true });
 });
 
 test("--lcov whose fetch fails fails the stage and removes the stale lcov", () => {
   const s = sandbox();
-  writeFileSync(join(s.bin, "scp"), "#!/usr/bin/env bash\necho 'scp: Connection closed' >&2\nexit 1\n");
-  chmodSync(join(s.bin, "scp"), 0o755);
   const cwd = join(s.dir, "local");
   mkdirSync(join(cwd, "coverage"), { recursive: true });
   writeFileSync(join(cwd, "coverage/lcov.info"), "SF:src/stale.ts\n");
   const r = run(["--lcov", "coverage/lcov.info", "ci/test"], {
     cwd,
-    env: {
-      SCI_BIN: s.sci,
-      SCI_WT: "myrepo",
-      FAKE_READ_HOST: "ci-read-host",
-      FAKE_JOB_PATH: "/remote/wt",
-      PATH: `${s.bin}:${process.env.PATH}`,
-    },
+    env: { SCI_BIN: s.sci, SCI_WT: "myrepo" },
   });
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /ci-read-host:\/remote\/wt\/coverage\/lcov\.info/);
+  assert.match(r.stderr, /job-abc123.*coverage\/lcov\.info/);
   assert.match(r.stderr, /stale coverage/);
   assert.throws(() => readFileSync(join(cwd, "coverage/lcov.info")));
-  rmSync(s.dir, { recursive: true, force: true });
-});
-
-test("--lcov with no read host resolved fails the stage, naming the job as passed", () => {
-  const s = sandbox();
-  const cwd = join(s.dir, "local");
-  mkdirSync(cwd);
-  const r = run(["--lcov", "coverage/lcov.info", "ci/test"], {
-    cwd,
-    env: { SCI_BIN: s.sci, SCI_WT: "myrepo", PATH: `${s.bin}:${process.env.PATH}` },
-  });
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /passed, but the CI host for its lcov could not be resolved/);
+  assert.throws(() => readFileSync(join(cwd, "coverage/lcov.info.part")));
   rmSync(s.dir, { recursive: true, force: true });
 });
 
@@ -188,7 +157,7 @@ test("--lcov is not fetched for a failing job; its exit code stands", () => {
     env: { SCI_BIN: s.sci, SCI_WT: "myrepo", FAKE_WAIT_RC: "4" },
   });
   assert.equal(r.status, 4);
-  assert.doesNotMatch(readFileSync(s.log, "utf8"), /readhost/);
+  assert.doesNotMatch(readFileSync(s.log, "utf8"), /artifact/);
   rmSync(s.dir, { recursive: true, force: true });
 });
 

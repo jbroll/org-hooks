@@ -9,9 +9,10 @@
 #   --label name      display name for the "queued" line (default: the suffix)
 #   --before script   run script before dispatch IF it exists+is executable
 #                     (the ci/before-test-push convention); its failure aborts
-#   --lcov path       after a passing job, scp <read-host>:<job-worktree>/<path>
-#                     to <path> locally, replacing it. A failed fetch exits 1
-#                     rather than leaving a stale file for a ratchet to grade.
+#   --lcov path       after a passing job, fetch <path> from the job's worktree
+#                     over `sci artifact` and replace <path> locally. A failed
+#                     fetch exits 1 rather than leaving a stale file for a
+#                     ratchet to grade.
 #   --fallback cmd    if the sci binary is absent, run cmd locally and exit with
 #                     its code. Without it, a missing binary fails loudly (127).
 #
@@ -66,22 +67,17 @@ rc=0
 trap - INT TERM
 
 if [ -n "$lcov" ] && [ "$rc" -eq 0 ]; then
-  # Reads go over a shell-capable login, not the push identity: that key is
-  # forced to the CI receive script and can serve neither scp nor sftp.
-  read_host=$("$SCI" readhost) || read_host=""
-  worktree=$("$SCI" path "$job") || worktree=""
-  if [ -z "$read_host" ] || [ -z "$worktree" ]; then
-    echo "sci-run: ${label} passed, but the CI host for its lcov could not be resolved" >&2
-    echo "sci-run: host='${read_host}' worktree='${worktree}' — refusing to grade stale $lcov" >&2
-    exit 1
-  fi
   rm -f "$lcov"
   mkdir -p "$(dirname "$lcov")"
-  if ! scp -q "$read_host:$worktree/$lcov" "$lcov"; then
-    echo "sci-run: ${label} passed, but its lcov did not come back from ${read_host}:${worktree}/${lcov}" >&2
+  # Staged through .part so a failed fetch leaves nothing a ratchet could
+  # mistake for this run's coverage.
+  if ! "$SCI" artifact "$job" "$lcov" > "$lcov.part"; then
+    rm -f "$lcov.part"
+    echo "sci-run: ${label} passed, but its lcov did not come back from job ${job} (${lcov})" >&2
     echo "sci-run: refusing to grade stale coverage" >&2
     exit 1
   fi
+  mv "$lcov.part" "$lcov"
 fi
 
 exit "$rc"
