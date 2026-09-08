@@ -123,6 +123,11 @@ The coverage ratchet runs at the end of each sci command — after `sci-run.sh` 
 retrieved the lcov from the CI host — so it always checks coverage from the current
 commit; the staged-file filtering lives in the shared `scripts/ratchet-staged.sh`.
 
+Retrieval uses `sci readhost`, not `sci host`: the push identity's key is forced to
+simple-ci's receive script and can run neither `scp` nor `sftp`. The local lcov is
+deleted before the copy and a failed copy fails the stage, so the ratchet can never
+grade the previous run's coverage.
+
 ## The `ci/` contract required by `profiles/sci-tiered.yml`
 
 The `tier2-gpu` stage pushes `<repo>/ci/test` and `<repo>/ci/e2e` to simple-ci and
@@ -373,7 +378,9 @@ line, `#` comments ignored. Every entry should carry a reason.
 ### Adoption checklist
 
 1. Clone the repo on the build host at `~/ci-workspace/<repo>`, and confirm
-   `sci host` resolves from your machine.
+   `sci host` and `sci readhost` both resolve from your machine. The second is the
+   shell-capable login the coverage lcovs are copied back over; without it tier 2
+   fails rather than grading the previous run's coverage.
 2. Copy `examples/lefthook.stub.yml` to `lefthook.yml`, list **only**
    `profiles/sci-tiered.yml` under `configs:`, and declare no `pre-commit:` block.
 3. Create the `rc:` file: export `ORG_HOOKS`, then `. "$ORG_HOOKS/rc.sh"`.
