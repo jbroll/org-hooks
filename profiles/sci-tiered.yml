@@ -284,9 +284,15 @@ pre-commit:
                 # previous run's lcov for the ratchet to grade as fresh.
                 rm -f "$LCOV" "$E2E_LCOV" "$E2E_BASELINE_LCOV"
                 mkdir -p "$(dirname "$LCOV")" "$(dirname "$E2E_LCOV")" "$(dirname "$E2E_BASELINE_LCOV")"
-                "$SCI" artifact "$job_u" "$LCOV" > "$LCOV.part" || {
-                  rm -f "$LCOV.part"; echo "tier2: unit lcov never arrived from job $job_u ($LCOV)"; exit 1; }
-                mv "$LCOV.part" "$LCOV"
+                # ci/test.sh exits without an lcov when the manifest is empty (a
+                # tests/-only or config-only commit), so only fetch when it ran.
+                if [ -s ci/.changed-files ]; then
+                  "$SCI" artifact "$job_u" "$LCOV" > "$LCOV.part" || {
+                    rm -f "$LCOV.part"; echo "tier2: unit lcov never arrived from job $job_u ($LCOV)"; exit 1; }
+                  mv "$LCOV.part" "$LCOV"
+                else
+                  echo "  unit ran no tests (ci/.changed-files empty) — no unit lcov to fetch"
+                fi
                 "$SCI" artifact "$job_e" "$E2E_LCOV" > "$E2E_LCOV.part" || {
                   rm -f "$E2E_LCOV.part"; echo "tier2: e2e lcov never arrived from job $job_e ($E2E_LCOV)"; exit 1; }
                 mv "$E2E_LCOV.part" "$E2E_LCOV"

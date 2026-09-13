@@ -239,7 +239,8 @@ With `E2E_BUILD_IMPACT_MAP` set, the CLI also writes
 Either may be absent because no job of that kind was dispatched, and
 `coverage-union-merge.mjs` treats a missing input as empty coverage — so the union
 degrades to the other source alone. But a job that *was* dispatched and produced no
-lcov fails the tier-2 stage outright, and `coverage/union/lcov.info` is deleted
+lcov fails the tier-2 stage outright, except the unit job when `ci/.changed-files` is
+empty: `ci/test.sh` runs nothing then, so no unit lcov is fetched. And `coverage/union/lcov.info` is deleted
 before every merge — so a skipped merge never leaves the ratchet reading a stale
 union from a previous commit.
 
