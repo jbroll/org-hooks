@@ -4,3 +4,6 @@ node_modules/
 
 # Guards this checkout against a concurrent update; created on the CI host.
 .cilock
+
+# Local git worktrees
+.worktrees/
