@@ -1,10 +1,10 @@
 # Copy this to a repo as `lefthook.yml`, then run `lefthook install`.
-# This stub is the ONLY hook config a repo carries; everything else is
-# pulled from the pinned org-hooks ref.
+# This stub is the ONLY hook config a repo carries; everything else tracks
+# the org-hooks tip (`ref: main` + `refetch: true` below).
 #
 # Onboarding checklist (per repo, one at a time):
 #   1. cp org-hooks/examples/lefthook.stub.yml <repo>/lefthook.yml
-#   2. set `git_url:` and `ref:` to your org-hooks path and tag
+#   2. set `git_url:` to your org-hooks checkout (`ref:` stays main)
 #   3. create lefthook-rc.sh (see below) and update the path in `rc:`
 #   4. choose the language profile(s) in `configs:` under `remotes:`
 #   5. add profiles/sci.yml if the repo dispatches tests to simple-ci
@@ -34,7 +34,8 @@
 
 remotes:
   - git_url: /home/john/src/org-hooks      # or git@github.com:org/org-hooks.git
-    ref: v0.6.5                             # pin to a tag — bump deliberately
+    ref: main
+    refetch: true                           # track tip — no version pins
     configs:
       # Two onboarding shapes — pick one. Light (common + language packs):
       # static checks only, and any suite outside the packs runs nowhere.

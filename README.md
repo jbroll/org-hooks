@@ -9,8 +9,9 @@ here.
 
 - **Polyglot, no Node tax** — Lefthook is a single Go binary; Python-only
   repos don't pull a Node toolchain just to get hooks.
-- **One config, many repos** — repos reference a pinned `ref:`; bumping
-  the tag here rolls out everywhere on next `lefthook install`.
+- **One config, many repos** — repos track tip (`ref: main` +
+  `refetch: true`); a change here rolls out everywhere on next
+  `lefthook install`.
 - **Worktree-safe** — Lefthook uses the common git dir correctly
   (relevant to the ai-roller ×3 and wicketmap ×4 worktrees).
 - **Tiered** — fast local static checks gate every commit first and fail
@@ -585,7 +586,10 @@ templates in `examples/ci/`, contract and checklist in
 
 [`docs/backlog.md`](docs/backlog.md).
 
-## Tagging
+## Consuming tip
 
-Consumers pin a `ref:`. Cut a tag after any change:
-`git tag vX.Y.Z && git push --tags` (bump consumers deliberately).
+Consumers track tip: `ref: main` with `refetch: true`, so the next
+`lefthook install` picks up org-hooks changes with no per-repo bump.
+Deliberate rollout per repo happens the other way — each repo adopts a
+profile when ready (see Onboarding a repo), not by pinning versions.
+Old tags (`vX.Y.Z`) predate this and are ignored; cut none.
