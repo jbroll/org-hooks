@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Merge a unit lcov and an e2e lcov into a UNION lcov, per line and per branch.
 //   node coverage-union-merge.mjs --unit <lcov> --e2e <lcov> --out <lcov> \
-//     [--e2e-baseline <lcov>] [--src-root src]
+//     [--e2e-baseline <lcov>] [--src-root src] [--roots "packages"]
 // A missing input file is treated as empty coverage (does not throw) so the
 // gate degrades to "the other source only" rather than crashing the commit.
 //
@@ -62,19 +62,26 @@ const e2eBaselinePath = arg("--e2e-baseline", "");
 const e2eBaselineSha = arg("--e2e-baseline-sha", "");
 const outPath = arg("--out", "coverage/union/lcov.info");
 const srcRoot = arg("--src-root", "src");
+// Repeatable; each value may itself be space-separated (the tier2 profile
+// passes --roots "${COVERAGE_ROOTS:-packages}" quoted as one word).
+const roots = process.argv
+  .flatMap((a, i, arr) => (a === "--roots" && i + 1 < arr.length ? [arr[i + 1]] : []))
+  .flatMap((v) => v.split(/\s+/))
+  .filter(Boolean);
+if (roots.length === 0) roots.push("packages");
 
 const unitText = readOrEmpty(unitPath);
 const e2eText = readOrEmpty(e2ePath);
 const e2eBaselineText = readOrEmpty(e2eBaselinePath);
 
-const unit = parseLcovDA(unitText, srcRoot);
-const e2e = parseLcovDA(e2eText, srcRoot);
-const unitBranches = parseLcovBRDA(unitText, srcRoot);
-const e2eBranches = parseLcovBRDA(e2eText, srcRoot);
+const unit = parseLcovDA(unitText, srcRoot, roots);
+const e2e = parseLcovDA(e2eText, srcRoot, roots);
+const unitBranches = parseLcovBRDA(unitText, srcRoot, roots);
+const e2eBranches = parseLcovBRDA(e2eText, srcRoot, roots);
 // Empty when --e2e-baseline is omitted or its file is missing → no-op union,
 // keeping behaviour byte-identical to the unit∪e2e-only case.
-let e2eBaseline = parseLcovDA(e2eBaselineText, srcRoot);
-let e2eBaselineBranches = parseLcovBRDA(e2eBaselineText, srcRoot);
+let e2eBaseline = parseLcovDA(e2eBaselineText, srcRoot, roots);
+let e2eBaselineBranches = parseLcovBRDA(e2eBaselineText, srcRoot, roots);
 if (e2eBaselineSha && e2eBaseline.size) {
   try {
     // -U0 vs the working tree (what the unit/e2e lcovs were measured on).
@@ -82,7 +89,7 @@ if (e2eBaselineSha && e2eBaseline.size) {
       encoding: "utf8",
       maxBuffer: 256 * 1024 * 1024,
     });
-    const hunks = parseDiffHunks(diff, srcRoot);
+    const hunks = parseDiffHunks(diff, srcRoot, roots);
     e2eBaseline = remapBaseline(e2eBaseline, hunks);
     e2eBaselineBranches = remapBaselineBranches(e2eBaselineBranches, hunks);
   } catch (e) {

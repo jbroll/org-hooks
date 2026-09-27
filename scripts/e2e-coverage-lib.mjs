@@ -56,21 +56,23 @@ export function isVendorPath(p) {
  * `origins`, when given, mirrors makeCoverageOptions' entryFilter so the lcov
  * and the impact map can't disagree about what counts as a source origin.
  */
-export function makeMapPath(rewrites, cwd, origins) {
+export function makeMapPath(rewrites, cwd, origins, roots = ["packages"]) {
+  const markers = [...roots.map((r) => `/${r}/`), "/src/"];
   return (url) => {
     if (origins && !origins.some((o) => url.includes(o))) return null;
     const clean = url.split("?")[0];
     const fs = clean.indexOf("/@fs/");
     const candidate = fs !== -1 ? clean.slice(fs + 4) : clean;
-    if (!candidate.includes("/packages/") && !candidate.includes("/src/")) return null;
-    const normalised = normalisePath(candidate, "src", cwd);
+    if (!markers.some((m) => candidate.includes(m))) return null;
+    const normalised = normalisePath(candidate, "src", cwd, roots);
     if (normalised.startsWith("/") || normalised.includes("://") || isVendorPath(normalised)) return null;
     return rewriteSourcePath(normalised, rewrites);
   };
 }
 
 /** Monocart CoverageReport options. Returned as a plain object — no monocart here. */
-export function makeCoverageOptions({ outputDir, origins, rewrites }) {
+export function makeCoverageOptions({ outputDir, origins, rewrites, roots = ["packages"] }) {
+  const markers = [...roots.map((r) => `/${r}/`), "/src/"];
   return {
     name: "E2E Coverage",
     outputDir,
@@ -79,7 +81,7 @@ export function makeCoverageOptions({ outputDir, origins, rewrites }) {
     // absolute /@fs/ dep url look like source, so node_modules is excluded here.
     entryFilter: (entry) =>
       origins.some((o) => entry.url.includes(o)) &&
-      entry.url.includes("/src/") &&
+      markers.some((m) => entry.url.includes(m)) &&
       !isVendorPath(entry.url),
     // Vite dev source maps carry bare filenames in `sources`; resolve them
     // against the compiled script's URL before any prefix rule can match.
@@ -90,7 +92,7 @@ export function makeCoverageOptions({ outputDir, origins, rewrites }) {
       }
       return rewriteSourcePath(resolved, rewrites);
     },
-    sourceFilter: (sourcePath) => sourcePath.includes("/src/") && !isVendorPath(sourcePath),
+    sourceFilter: (sourcePath) => markers.some((m) => sourcePath.includes(m)) && !isVendorPath(sourcePath),
     // The CLI builds one report per run; a clean would discard nothing but
     // could race a partially-written cache.
     cleanCache: false,

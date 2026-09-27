@@ -49,6 +49,19 @@
 #                    "circular:1" (a cycle fails the commit). A repo with
 #                    pre-existing cycles through barrels exports "circular:0"
 #                    (warn-only) from its rc: until the cycles are cleaned up.
+#   TS_SCAN_ROOTS    space-separated source roots for the whole-project TS
+#                    scanners (dup-types, no-reexports, jazz-waist) and the
+#                    dpdm circular entries. Default
+#                    "src packages/*/src backend/src" (nonexistent roots are
+#                    dropped). A monorepo with more roots exports e.g.
+#                    "src packages/*/src apps/*/src file-format/*/src".
+#   COVERAGE_ROOTS   workspace roots keeping their `<root>/...` identity in
+#                    lcov paths instead of collapsing into src/ (which loses
+#                    identity and can collide across roots). Default
+#                    "packages". Repeatable --roots under the hood.
+#   COVERAGE_RATCHET_GLOB  ERE selecting which staged files the union ratchet
+#                    gates. Default ^(src|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs)$.
+#                    A repo with more roots widens it to match.
 #   SCI_BIN          Path to the simple-ci binary (default below). Falls back
 #                    to `npm run test:coverage` / `test:e2e` if not executable.
 #   COVERAGE_* / COVERAGE_E2E_*  ratchet lcov/baseline/floor/tolerance paths.
@@ -109,13 +122,15 @@ pre-commit:
             stage_fixed: true
           - name: ts-dup-types
             glob: "*.{ts,tsx}"
-            run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs" src 'packages/*/src'
+            # No explicit roots: the scanner resolves TS_SCAN_ROOTS from the
+            # environment, falling back to src + packages/*/src + backend/src.
+            run: node "${ORG_HOOKS}/scripts/check-duplicate-types.mjs"
           - name: ts-no-reexports
             glob: "*.{ts,tsx,js,jsx,mjs}"
-            run: node "${ORG_HOOKS}/scripts/check-no-reexports.mjs" src 'packages/*/src'
+            run: node "${ORG_HOOKS}/scripts/check-no-reexports.mjs"
           - name: ts-jazz-waist
             glob: "*.{ts,tsx,js,jsx,mjs}"
-            run: node "${ORG_HOOKS}/scripts/check-jazz-value-import-ban.mjs" src backend/src 'packages/*/src'
+            run: node "${ORG_HOOKS}/scripts/check-jazz-value-import-ban.mjs"
           - name: ts-size-cap
             glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
             run: '"${ORG_HOOKS}/scripts/hygiene.sh" size-cap {staged_files}'
@@ -168,13 +183,16 @@ pre-commit:
             glob: "*.{ts,tsx,json}"
             run: npm run knip
           # ts-circular: exit policy is the DPDM_CIRCULAR env var (default
-          # strict). A repo with known cycles relaxes it WITHOUT touching config
-          # by exporting DPDM_CIRCULAR=circular:0 from its rc: file.
+          # strict), entries come from TS_SCAN_ROOTS (default
+          # "src packages/*/src backend/src"). A repo with known cycles
+          # relaxes the policy WITHOUT touching config by exporting
+          # DPDM_CIRCULAR=circular:0 from its rc: file; a repo with more
+          # source roots extends TS_SCAN_ROOTS the same way.
           - name: ts-circular
             glob: "*.{ts,tsx}"
             run: >-
-              npx --no-install dpdm --no-warning --no-tree
-              --exit-code "${DPDM_CIRCULAR:-circular:1}" "src/**/*.{ts,tsx}" "packages/*/src/**/*.{ts,tsx}"
+              entries=""; for r in ${TS_SCAN_ROOTS:-src packages/*/src backend/src}; do entries="$entries \"$r/**/*.{ts,tsx}\""; done;
+              eval "npx --no-install dpdm --no-warning --no-tree --exit-code \"${DPDM_CIRCULAR:-circular:1}\" $entries"
           # Python whole-project analysis, each run at its own project root by
           # py-run.sh. mypy and pytest come from the project's own env (`uv run`),
           # so a repo pins them in its dev group and controls strictness in
@@ -229,7 +247,7 @@ pre-commit:
           # so a repo needing different scoping changes them here.
           - name: coverage-union
             glob:
-              - "{src,packages,backend,scripts,ci}/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}"
+              - "{src,packages,apps,file-format,backend,scripts,ci}/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}"
               - "*.{ts,tsx,js,jsx,mjs,cjs,json}"
               - "{host-bridge,android-bridge}/**"
             run: |
@@ -309,16 +327,18 @@ pre-commit:
                 UNION_LCOV=${COVERAGE_UNION_LCOV:-coverage/union/lcov.info}
                 UNION_BASELINE=${COVERAGE_UNION_BASELINE:-coverage-union-baseline.json}
                 rm -f "$UNION_LCOV"
-                if [ -n "${ORG_HOOKS:-}" ] && { [ -f "$LCOV" ] || [ -f "$E2E_LCOV" ]; }; then
-                  node "${ORG_HOOKS}/scripts/coverage-union-merge.mjs" \
-                    --unit "$LCOV" --e2e "$E2E_LCOV" --e2e-baseline "$E2E_BASELINE_LCOV" \
-                    ${E2E_BASELINE_SHA:+--e2e-baseline-sha "$E2E_BASELINE_SHA"} \
-                    --out "$UNION_LCOV" --src-root src || exit 1
-                fi
-                "${ORG_HOOKS}/scripts/ratchet-staged.sh" --lcov "$UNION_LCOV" \
-                  --baseline "$UNION_BASELINE" \
-                  --exclude-file coverage-union-ratchet-exclude \
-                  --glob '^(src|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs)$' || exit 1
+                 if [ -n "${ORG_HOOKS:-}" ] && { [ -f "$LCOV" ] || [ -f "$E2E_LCOV" ]; }; then
+                   node "${ORG_HOOKS}/scripts/coverage-union-merge.mjs" \
+                     --unit "$LCOV" --e2e "$E2E_LCOV" --e2e-baseline "$E2E_BASELINE_LCOV" \
+                     ${E2E_BASELINE_SHA:+--e2e-baseline-sha "$E2E_BASELINE_SHA"} \
+                     --out "$UNION_LCOV" --src-root src \
+                     --roots "${COVERAGE_ROOTS:-packages}" || exit 1
+                 fi
+                 "${ORG_HOOKS}/scripts/ratchet-staged.sh" --lcov "$UNION_LCOV" \
+                   --baseline "$UNION_BASELINE" \
+                   --exclude-file coverage-union-ratchet-exclude \
+                   --roots "${COVERAGE_ROOTS:-packages}" \
+                   --glob "${COVERAGE_RATCHET_GLOB:-^(src|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs)$}" || exit 1
                 exit 0
               else
                 npm run test:coverage && npm run test:e2e

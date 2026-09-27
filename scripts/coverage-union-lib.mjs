@@ -19,7 +19,7 @@ import { normalisePath } from "./coverage-ratchet-lib.mjs";
  * @param {string} srcRoot
  * @returns {FileLines}
  */
-export function parseLcovDA(text, srcRoot) {
+export function parseLcovDA(text, srcRoot, roots = ["packages"]) {
   /** @type {FileLines} */
   const files = new Map();
   /** @type {Map<number, number>|null} */
@@ -27,7 +27,7 @@ export function parseLcovDA(text, srcRoot) {
   for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (line.startsWith("SF:")) {
-      const sf = normalisePath(line.slice(3).trim(), srcRoot);
+      const sf = normalisePath(line.slice(3).trim(), srcRoot, process.cwd(), roots);
       lines = files.get(sf);
       if (!lines) {
         lines = new Map();
@@ -56,7 +56,7 @@ export function parseLcovDA(text, srcRoot) {
  * @param {string} srcRoot
  * @returns {FileBranches}
  */
-export function parseLcovBRDA(text, srcRoot) {
+export function parseLcovBRDA(text, srcRoot, roots = ["packages"]) {
   /** @type {FileBranches} */
   const files = new Map();
   /** @type {Map<string, number>|null} */
@@ -64,7 +64,7 @@ export function parseLcovBRDA(text, srcRoot) {
   for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (line.startsWith("SF:")) {
-      const sf = normalisePath(line.slice(3).trim(), srcRoot);
+      const sf = normalisePath(line.slice(3).trim(), srcRoot, process.cwd(), roots);
       branches = files.get(sf);
       if (!branches) {
         branches = new Map();
@@ -256,7 +256,7 @@ export function formatLcov(files, branchesByFile = new Map()) {
  * @param {string} srcRoot
  * @returns {Map<string, Hunk[]>}
  */
-export function parseDiffHunks(diffText, srcRoot) {
+export function parseDiffHunks(diffText, srcRoot, roots = ["packages"]) {
   /** @type {Map<string, Hunk[]>} */
   const out = new Map();
   /** @type {Hunk[]|null} */
@@ -268,7 +268,7 @@ export function parseDiffHunks(diffText, srcRoot) {
         cur = null;
         continue;
       }
-      const sf = normalisePath(p, srcRoot);
+      const sf = normalisePath(p, srcRoot, process.cwd(), roots);
       cur = [];
       out.set(sf, cur);
     } else if (raw.startsWith("@@") && cur) {

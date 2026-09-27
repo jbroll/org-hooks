@@ -9,7 +9,7 @@
 // Usage:
 //   node e2e-coverage.mjs report --worktree <dir> --origin host:port \
 //     [--raw coverage/e2e-raw] [--out coverage/e2e] [--impact coverage/e2e-impact] \
-//     [--rewrite from=to ...] [--require-prefix prefix ...]
+//     [--rewrite from=to ...] [--require-prefix prefix ...] [--roots "a b" ...]
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -87,6 +87,8 @@ async function report(argv) {
   assertInsideWorktree(outDir, worktree, "out");
   assertInsideWorktree(impactDir, worktree, "impact");
   const origins = argValues(argv, "--origin");
+  const roots = argValues(argv, "--roots").flatMap((v) => v.split(/\s+/)).filter(Boolean);
+  if (roots.length === 0) roots.push("packages");
   let rewrites;
   try {
     rewrites = parseRewrites(argValues(argv, "--rewrite"));
@@ -100,7 +102,7 @@ async function report(argv) {
   const dumps = readDumps(rawDir);
 
   rmSync(outDir, { recursive: true, force: true });
-  const mcr = new CoverageReport(makeCoverageOptions({ outputDir: outDir, origins, rewrites }));
+  const mcr = new CoverageReport(makeCoverageOptions({ outputDir: outDir, origins, rewrites, roots }));
   for (const { data } of dumps) if (data?.length) await mcr.add(data);
   await mcr.generate();
 
@@ -113,7 +115,7 @@ async function report(argv) {
   const requirePrefixes = argValues(argv, "--require-prefix");
   if (requirePrefixes.length > 0) {
     const offending = sfLines
-      .map((l) => normalisePath(l.slice(3), "src", worktree))
+      .map((l) => normalisePath(l.slice(3), "src", worktree, roots))
       .filter((p) => !requirePrefixes.some((prefix) => p.startsWith(prefix)));
     if (offending.length > 0) {
       const shown = offending.slice(0, 5).join(", ");
@@ -126,7 +128,7 @@ async function report(argv) {
   }
 
   if (process.env.E2E_BUILD_IMPACT_MAP) {
-    const records = foldImpact(dumps, makeMapPath(rewrites, worktree, origins));
+    const records = foldImpact(dumps, makeMapPath(rewrites, worktree, origins, roots));
     rmSync(impactDir, { recursive: true, force: true });
     mkdirSync(impactDir, { recursive: true });
     const jsonl = records.map((r) => JSON.stringify(r)).join("\n");

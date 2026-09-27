@@ -26,25 +26,31 @@ function entry(v) {
  * @param {string} srcRoot
  * @param {string} [cwd]
  */
-export function normalisePath(p, srcRoot, cwd = process.cwd()) {
-  // Workspace packages carry their own `<pkg>/src` root. Anchor on `packages/`
-  // BEFORE the srcRoot marker so a package file keeps its
+export function normalisePath(p, srcRoot, cwd = process.cwd(), roots = ["packages"]) {
+  // Workspace roots carry their own `<root>/<pkg>/src` identity. Anchor on
+  // each root BEFORE the srcRoot marker so a package file keeps its
   // `packages/<pkg>/src/...` identity instead of collapsing into the top-level
   // src/ namespace (which loses identity and can collide with src/ files).
+  // Default is ["packages"]; monorepos with more source roots (apps/,
+  // file-format/) pass them via the COVERAGE_ROOTS-tunable --roots flag.
   if (path.isAbsolute(p)) {
     const cwdSep = cwd + path.sep;
     if (p.startsWith(cwdSep)) return p.slice(cwdSep.length);
-    const pkgMarker = `${path.sep}packages${path.sep}`;
-    const pkgIdx = p.indexOf(pkgMarker);
-    if (pkgIdx !== -1) return p.slice(pkgIdx + 1);
+    for (const r of roots) {
+      const marker = `${path.sep}${r}${path.sep}`;
+      const idx = p.indexOf(marker);
+      if (idx !== -1) return p.slice(idx + 1);
+    }
     const marker = `${path.sep}${srcRoot}${path.sep}`;
     const idx = p.indexOf(marker);
     if (idx !== -1) return p.slice(idx + 1);
     return p;
   }
-  if (p.startsWith("packages/")) return p;
-  const pkgIdx = p.indexOf("/packages/");
-  if (pkgIdx !== -1) return p.slice(pkgIdx + 1);
+  for (const r of roots) {
+    if (p.startsWith(`${r}/`)) return p;
+    const idx = p.indexOf(`/${r}/`);
+    if (idx !== -1) return p.slice(idx + 1);
+  }
   const marker = `/${srcRoot}/`;
   const idx = p.indexOf(marker);
   if (idx !== -1) return p.slice(idx + 1);
@@ -54,9 +60,10 @@ export function normalisePath(p, srcRoot, cwd = process.cwd()) {
 /**
  * @param {string} text
  * @param {string} srcRoot
+ * @param {string[]} [roots]
  * @returns {Record<string, FileMetric>}
  */
-export function parseLcov(text, srcRoot) {
+export function parseLcov(text, srcRoot, roots = ["packages"]) {
   /** @type {Record<string, FileMetric>} */
   const out = {};
   let sf = /** @type {string|null} */ (null);
@@ -66,7 +73,7 @@ export function parseLcov(text, srcRoot) {
   let brh = 0;
   for (const line of text.split("\n")) {
     if (line.startsWith("SF:")) {
-      sf = normalisePath(line.slice(3).trim(), srcRoot);
+      sf = normalisePath(line.slice(3).trim(), srcRoot, process.cwd(), roots);
       lf = 0;
       lh = 0;
       brf = 0;
@@ -107,9 +114,10 @@ export function fmtPct(p) {
  * ratios 0-1. Normalises paths; collapses duplicates via max, per metric.
  * @param {unknown} parsed
  * @param {string} srcRoot
+ * @param {string[]} [roots]
  * @returns {Record<string, BaselineEntry>}
  */
-export function parseBaseline(parsed, srcRoot) {
+export function parseBaseline(parsed, srcRoot, roots = ["packages"]) {
   const obj = /** @type {{version?: number; files?: Record<string, number|BaselineEntry>}} */ (
     parsed
   );
@@ -118,7 +126,7 @@ export function parseBaseline(parsed, srcRoot) {
   /** @type {Record<string, BaselineEntry>} */
   const files = {};
   for (const [k, v] of Object.entries(obj.files ?? {})) {
-    const key = normalisePath(String(k), srcRoot);
+    const key = normalisePath(String(k), srcRoot, process.cwd(), roots);
     const e = entry(v);
     const lines = Number(e.lines) / 100;
     const branches = e.branches === undefined ? undefined : Number(e.branches) / 100;

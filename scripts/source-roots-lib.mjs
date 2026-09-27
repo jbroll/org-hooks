@@ -17,7 +17,7 @@
 
 import { existsSync, readdirSync, statSync } from "node:fs";
 
-export const DEFAULT_ROOTS = ["src", "packages/*/src"];
+export const DEFAULT_ROOTS = ["src", "packages/*/src", "backend/src"];
 
 // Expand one `*` segment against the filesystem. `packages/*/src` ->
 // ["packages/web/src", "packages/e2e/src", ...] for those that exist.
@@ -36,11 +36,15 @@ function expandGlob(pattern) {
     .filter((p) => existsSync(p) && statSync(p).isDirectory());
 }
 
-// argv: the raw process.argv.slice(2) of a scanner. Empty means "use the
-// conventional roots"; explicit args override entirely so a profile can
-// scope a scan narrowly.
+// argv: the raw process.argv.slice(2) of a scanner. Explicit args override
+// entirely so a profile can scope a scan narrowly. With no argv, the
+// TS_SCAN_ROOTS env var (space-separated, same pattern language) replaces
+// the defaults — the profile-level tunable for monorepos whose sources live
+// outside src/ and packages/*/src. Non-existent roots are dropped silently:
+// passing `backend/src` to a repo without a backend is normal.
 export function resolveRoots(argv) {
-  const patterns = argv.length > 0 ? argv : DEFAULT_ROOTS;
+  const env = (process.env.TS_SCAN_ROOTS ?? "").split(/\s+/).filter(Boolean);
+  const patterns = argv.length > 0 ? argv : env.length > 0 ? env : DEFAULT_ROOTS;
   const seen = new Set();
   for (const pattern of patterns) {
     for (const root of expandGlob(pattern)) {

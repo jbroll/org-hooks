@@ -45,6 +45,8 @@
 //                     staged files (default: $COVERAGE_CHECK_ALL=1; off)
 //   --src-root DIR    strip path prefix up to this dir name when normalising lcov
 //                     SF: paths (default: src)
+//   --roots "A B"     workspace roots keeping their `<root>/...` identity
+//                     instead of collapsing into src/ (default: "packages")
 //   --seed            HARD RESET: write current lcov to baseline unconditionally,
 //                     discarding the existing baseline; no gate check. Use only
 //                     when code was legitimately removed and old marks should be
@@ -84,6 +86,8 @@ let waiverDrop = Number(process.env.COVERAGE_REGRESSION_WAIVER_DROP ?? "0.05");
 let lineTolerance = Number(process.env.COVERAGE_LINE_TOLERANCE ?? "5");
 let branchTolerance = Number(process.env.COVERAGE_BRANCH_TOLERANCE ?? "2");
 let srcRoot = "src";
+/** @type {string[]} Repeatable; each value may itself be space-separated. */
+let roots = [];
 let seedMode = false;
 let reseedMode = false;
 let branches = process.env.COVERAGE_BRANCHES === "1";
@@ -102,6 +106,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (arg === "--line-tolerance") lineTolerance = Number(process.argv[++i]);
   else if (arg === "--branch-tolerance") branchTolerance = Number(process.argv[++i]);
   else if (arg === "--src-root") srcRoot = process.argv[++i];
+  else if (arg === "--roots") roots.push(...process.argv[++i].split(/\s+/).filter(Boolean));
   else if (arg === "--seed") seedMode = true;
   else if (arg === "--reseed") reseedMode = true;
   else if (arg === "--branches") branches = true;
@@ -110,6 +115,7 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 
 const writeMode = seedMode || reseedMode;
+if (roots.length === 0) roots = ["packages"];
 if (!writeMode && !checkAll && stagedFiles.length === 0) process.exit(0);
 
 // ---------------------------------------------------------------------------
@@ -123,7 +129,7 @@ const baselineExists = fs.existsSync(baselinePath);
 /** @type {Record<string, import("./coverage-ratchet-lib.mjs").BaselineEntry>} */
 const baseline =
   baselineExists && !seedMode
-    ? parseBaseline(JSON.parse(fs.readFileSync(baselinePath, "utf8")), srcRoot)
+    ? parseBaseline(JSON.parse(fs.readFileSync(baselinePath, "utf8")), srcRoot, roots)
     : {};
 
 function writeBaseline(
@@ -167,7 +173,7 @@ if (!fs.existsSync(lcovPath)) {
   process.exit(0);
 }
 
-const lcov = parseLcov(fs.readFileSync(lcovPath, "utf8"), srcRoot);
+const lcov = parseLcov(fs.readFileSync(lcovPath, "utf8"), srcRoot, roots);
 
 // ---------------------------------------------------------------------------
 // Write modes

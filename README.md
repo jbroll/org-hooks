@@ -76,6 +76,9 @@ the consumer's `rc:`), never config overrides:
 |---|---|---|
 | `ORG_HOOKS` | — (required) | absolute path to this checkout |
 | `DPDM_CIRCULAR` | `circular:1` | ts-circular exit policy; set `circular:0` for warn-only in repos with known cycles |
+| `TS_SCAN_ROOTS` | `src packages/*/src backend/src` | source roots for the whole-project TS scanners (dup-types, no-reexports, jazz-waist) and dpdm entries; nonexistent roots are dropped. A monorepo with more roots exports e.g. `src packages/*/src apps/*/src file-format/*/src` |
+| `COVERAGE_ROOTS` | `packages` | workspace roots keeping their `<root>/...` identity in lcov paths instead of collapsing into `src/` (identity loss + cross-root collisions). Repeatable `--roots` under the hood |
+| `COVERAGE_RATCHET_GLOB` | `^(src\|packages)/.*\.(ts\|tsx\|js\|jsx\|mjs\|cjs)$` | ERE selecting which staged files the union ratchet gates; widen to match `COVERAGE_ROOTS` |
 | `SCI_WT` | derived | CI queue name; **not needed** — derived from the git common dir so all worktrees of a repo resolve to the repo dir name |
 | `SCI_BIN` | `/home/john/src/simple-ci/sci` | simple-ci binary; falls back to `npm run test:coverage`/`test:e2e` if absent |
 | `COVERAGE_E2E_BASELINE_LCOV` | `coverage/e2e-fullrun/lcov.info` | local path the persisted full-run e2e lcov is fetched to and fed to the union merge as `--e2e-baseline` (full-e2e carry-forward, below) |

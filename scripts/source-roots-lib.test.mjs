@@ -76,6 +76,38 @@ test("duplicate patterns yield one root each", () => {
   });
 });
 
-test("DEFAULT_ROOTS covers the flat and workspace conventions", () => {
-  assert.deepEqual(DEFAULT_ROOTS, ["src", "packages/*/src"]);
+test("DEFAULT_ROOTS covers the flat, workspace and backend conventions", () => {
+  assert.deepEqual(DEFAULT_ROOTS, ["src", "packages/*/src", "backend/src"]);
+});
+
+test("TS_SCAN_ROOTS replaces the defaults when no argv is given", () => {
+  const prev = process.env.TS_SCAN_ROOTS;
+  inRepo(["src", "apps/web/src"], () => {
+    process.env.TS_SCAN_ROOTS = "apps/*/src";
+    try {
+      assert.deepEqual(resolveRoots([]), ["apps/web/src"]);
+    } finally {
+      if (prev === undefined) delete process.env.TS_SCAN_ROOTS;
+      else process.env.TS_SCAN_ROOTS = prev;
+    }
+  });
+});
+
+test("explicit argv still beats TS_SCAN_ROOTS", () => {
+  const prev = process.env.TS_SCAN_ROOTS;
+  inRepo(["src", "apps/web/src"], () => {
+    process.env.TS_SCAN_ROOTS = "apps/*/src";
+    try {
+      assert.deepEqual(resolveRoots(["src"]), ["src"]);
+    } finally {
+      if (prev === undefined) delete process.env.TS_SCAN_ROOTS;
+      else process.env.TS_SCAN_ROOTS = prev;
+    }
+  });
+});
+
+test("backend/src resolves from the defaults when nothing else exists", () => {
+  inRepo(["backend/src"], () => {
+    assert.deepEqual(resolveRoots([]), ["backend/src"]);
+  });
 });
