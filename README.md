@@ -13,8 +13,10 @@ here.
   the tag here rolls out everywhere on next `lefthook install`.
 - **Worktree-safe** — Lefthook uses the common git dir correctly
   (relevant to the ai-roller ×3 and wicketmap ×4 worktrees).
-- **Tiered** — fast staged-only checks on commit; heavier checks on push;
-  full test/coverage/e2e in CI or dispatched to the GPU queue.
+- **Tiered** — fast local static checks gate every commit first and fail
+  fast; heavier unit+e2e suites are dispatched to the GPU queue but still
+  block the same commit. Pre-push holds only light static overflow, never
+  the suites.
 
 ## Tiers
 

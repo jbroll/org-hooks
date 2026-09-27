@@ -50,3 +50,11 @@ and when is in the git log.
   legitimately lost every branch to a refactor from one whose records merely disappeared —
   failing both would make a routine refactor unpassable. A loud warning naming the affected
   files is preferable to a failure.
+
+## Consumers
+
+- **Rowboat's `ci/test` header claims a pre-push wiring that does not exist.**
+  `ci/test:2-5` says "Wired into `git push` via the pre-push hook in
+  lefthook.yml", but rowboat's `lefthook.yml` has no `pre-push:` block and
+  neither does the `profiles/ts.yml` it pulls. Fix the comment or wire the
+  hook; while here, confirm no other consumer carries the same stale claim.

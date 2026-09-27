@@ -36,6 +36,12 @@ remotes:
   - git_url: /home/john/src/org-hooks      # or git@github.com:org/org-hooks.git
     ref: v0.6.5                             # pin to a tag — bump deliberately
     configs:
+      # Two onboarding shapes — pick one. Light (common + language packs):
+      # static checks only, and any suite outside the packs runs nowhere.
+      # Full-gate (profiles/sci-tiered.yml ALONE, no other configs, zero
+      # consumer pre-commit overrides): static plus GPU-dispatched unit+e2e
+      # with fail-fast tiers and a coverage ratchet. See README "Tiered
+      # fail-fast gate" before choosing light.
       - lefthook-common.yml
       - profiles/ts.yml       # and/or profiles/python.yml, profiles/specs.yml
       # - profiles/sci.yml    # add if this repo dispatches tests to simple-ci
