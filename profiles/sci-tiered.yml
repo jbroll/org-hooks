@@ -303,12 +303,16 @@ pre-commit:
                 rm -f "$LCOV" "$E2E_LCOV" "$E2E_BASELINE_LCOV"
                 mkdir -p "$(dirname "$LCOV")" "$(dirname "$E2E_LCOV")" "$(dirname "$E2E_BASELINE_LCOV")"
                 # ci/test.sh exits without an lcov when the manifest is empty (a
-                # tests/-only or config-only commit), so only fetch when it ran.
-                if [ -s ci/.changed-files ]; then
-                  "$SCI" artifact "$job_u" "$LCOV" > "$LCOV.part" || {
-                    rm -f "$LCOV.part"; echo "tier2: unit lcov never arrived from job $job_u ($LCOV)"; exit 1; }
+                # tests/-only or config-only commit), but a repo whose ci/test runs
+                # the whole suite writes one regardless, and a COVERAGE_CHECK_ALL
+                # ratchet graded without it reads every file as unit-uncovered.
+                if "$SCI" artifact "$job_u" "$LCOV" > "$LCOV.part"; then
                   mv "$LCOV.part" "$LCOV"
                 else
+                  rm -f "$LCOV.part"
+                  if [ -s ci/.changed-files ]; then
+                    echo "tier2: unit lcov never arrived from job $job_u ($LCOV)"; exit 1
+                  fi
                   echo "  unit ran no tests (ci/.changed-files empty) — no unit lcov to fetch"
                 fi
                 "$SCI" artifact "$job_e" "$E2E_LCOV" > "$E2E_LCOV.part" || {
