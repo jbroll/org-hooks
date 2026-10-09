@@ -3,7 +3,16 @@
 //   node --test scripts/sci-run.test.mjs
 
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -24,7 +33,8 @@ function sandbox() {
     `#!/usr/bin/env bash
 echo "$*" >> "${log}"
 case "$1" in
-  push) echo "job-abc123";;
+  push) [ -n "\${FAKE_PUSH_COPY:-}" ] && { echo "$PWD" > "\${FAKE_PUSH_COPY}.cwd"; cp -r . "\${FAKE_PUSH_COPY}"; }
+        echo "job-abc123";;
   wait) echo "wait streamed log"; exit "\${FAKE_WAIT_RC:-0}";;
   kill) ;;
   host) echo "\${FAKE_HOST:-}";;
@@ -199,4 +209,116 @@ test("usage errors exit 2", () => {
   assert.equal(run([]).status, 2);
   assert.equal(run(["--bogus", "ci/test"]).status, 2);
   assert.equal(run(["a", "b"]).status, 2);
+});
+
+function gitRepo(dir) {
+  const git = (...args) => {
+    const r = spawnSync("git", args, {
+      cwd: dir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "t",
+        GIT_AUTHOR_EMAIL: "t@t",
+        GIT_COMMITTER_NAME: "t",
+        GIT_COMMITTER_EMAIL: "t@t",
+      },
+    });
+    assert.equal(r.status, 0, r.stderr);
+  };
+  mkdirSync(dir);
+  git("init", "-q");
+  return git;
+}
+
+test("--index pushes the staged tree: no untracked files, no unstaged edits, no staged deletions", () => {
+  const s = sandbox();
+  const repo = join(s.dir, "myrepo");
+  const git = gitRepo(repo);
+  mkdirSync(join(repo, "src"));
+  writeFileSync(join(repo, "src/kept.ts"), "committed\n");
+  writeFileSync(join(repo, "src/deleted.ts"), "committed\n");
+  writeFileSync(join(repo, "run.sh"), "#!/bin/sh\n");
+  chmodSync(join(repo, "run.sh"), 0o755);
+  git("add", "-A");
+  git("commit", "-qm", "init");
+  writeFileSync(join(repo, "src/kept.ts"), "staged\n");
+  git("add", "src/kept.ts");
+  writeFileSync(join(repo, "src/kept.ts"), "unstaged\n");
+  writeFileSync(join(repo, "src/untracked.ts"), "untracked\n");
+  git("rm", "-q", "src/deleted.ts");
+
+  const copy = join(s.dir, "pushed");
+  const r = run(["--index", "ci/test"], {
+    cwd: repo,
+    env: { SCI_BIN: s.sci, SCI_WT: "", FAKE_PUSH_COPY: copy },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readFileSync(s.log, "utf8"), /push myrepo\/ci\/test/);
+  assert.equal(readFileSync(join(copy, "src/kept.ts"), "utf8"), "staged\n");
+  assert.equal(existsSync(join(copy, "src/untracked.ts")), false);
+  assert.equal(existsSync(join(copy, "src/deleted.ts")), false);
+  assert.equal(statSync(join(copy, "run.sh")).mode & 0o111, 0o111);
+  const pushedFrom = readFileSync(`${copy}.cwd`, "utf8").trim();
+  assert.notEqual(pushedFrom, repo);
+  assert.equal(existsSync(pushedFrom), false, "the exported tree is removed on exit");
+  rmSync(s.dir, { recursive: true, force: true });
+});
+
+test("--index run from a subdirectory still pushes the whole index", () => {
+  const s = sandbox();
+  const repo = join(s.dir, "myrepo");
+  const git = gitRepo(repo);
+  mkdirSync(join(repo, "sub"));
+  writeFileSync(join(repo, "top.txt"), "top\n");
+  writeFileSync(join(repo, "sub/inner.txt"), "inner\n");
+  git("add", "-A");
+  const copy = join(s.dir, "pushed");
+  const r = run(["--index", "ci/test"], {
+    cwd: join(repo, "sub"),
+    env: { SCI_BIN: s.sci, SCI_WT: "myrepo", FAKE_PUSH_COPY: copy },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(join(copy, "top.txt"), "utf8"), "top\n");
+  assert.equal(readFileSync(join(copy, "sub/inner.txt"), "utf8"), "inner\n");
+  rmSync(s.dir, { recursive: true, force: true });
+});
+
+test("--index keeps --lcov in the real worktree, not the exported tree", () => {
+  const s = sandbox();
+  const repo = join(s.dir, "myrepo");
+  const git = gitRepo(repo);
+  writeFileSync(join(repo, "f"), "x");
+  git("add", "f");
+  git("commit", "-qm", "init");
+  const remote = join(s.dir, "remote-wt");
+  mkdirSync(join(remote, "coverage"), { recursive: true });
+  writeFileSync(join(remote, "coverage/lcov.info"), "SF:src/a.ts\n");
+  const r = run(["--index", "--lcov", "coverage/lcov.info", "ci/test"], {
+    cwd: repo,
+    env: { SCI_BIN: s.sci, SCI_WT: "myrepo", FAKE_ARTIFACT_ROOT: remote },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readFileSync(join(repo, "coverage/lcov.info"), "utf8"), /SF:src\/a\.ts/);
+  rmSync(s.dir, { recursive: true, force: true });
+});
+
+test("--index outside a git repo fails before pushing", () => {
+  const s = sandbox();
+  const cwd = join(s.dir, "not-a-repo");
+  mkdirSync(cwd);
+  const r = run(["--index", "ci/test"], {
+    cwd,
+    env: { SCI_BIN: s.sci, SCI_WT: "myrepo", GIT_CEILING_DIRECTORIES: s.dir },
+  });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /not a git repository/);
+  assert.equal(existsSync(s.log), false, "nothing was pushed");
+  rmSync(s.dir, { recursive: true, force: true });
+});
+
+test("--index with --fallback is a usage error: a local fallback would test the working tree", () => {
+  const r = run(["--index", "--fallback", "true", "ci/test"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--index.*--fallback/);
 });

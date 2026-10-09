@@ -4,8 +4,13 @@
 # CI host, streams the job log via `sci wait`, kills the remote job if the
 # hook is interrupted, and exits with the job's exit code.
 #
-#   sci-run.sh [--label name] [--before script] [--lcov path] [--fallback cmd] <job-suffix>
+#   sci-run.sh [--index] [--label name] [--before script] [--lcov path] [--fallback cmd] <job-suffix>
 #
+#   --index           push the git index (the staged tree a commit records)
+#                     instead of the working tree, so untracked files and
+#                     unstaged edits never reach the job. For commit gates.
+#                     Conflicts with --fallback, which would run on the
+#                     working tree.
 #   --label name      display name for the "queued" line (default: the suffix)
 #   --before script   run script before dispatch IF it exists+is executable
 #                     (the ci/before-test-push convention); its failure aborts
@@ -22,13 +27,14 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: sci-run.sh [--label name] [--before script] [--lcov path] [--fallback cmd] <job-suffix>" >&2
+  echo "usage: sci-run.sh [--index] [--label name] [--before script] [--lcov path] [--fallback cmd] <job-suffix>" >&2
   exit 2
 }
 
-label="" before="" lcov="" fallback=""
+index="" label="" before="" lcov="" fallback=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    --index) index=1; shift ;;
     --label) label="${2:?}"; shift 2 ;;
     --before) before="${2:?}"; shift 2 ;;
     --lcov) lcov="${2:?}"; shift 2 ;;
@@ -38,6 +44,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ $# -eq 1 ] || usage
+if [ -n "$index" ] && [ -n "$fallback" ]; then
+  echo "sci-run: --index and --fallback conflict: the fallback would test the working tree" >&2
+  exit 2
+fi
 suffix="$1"
 label="${label:-$suffix}"
 
@@ -58,7 +68,15 @@ if [ -n "$before" ] && [ -x "$before" ]; then
   "$before"
 fi
 
-job=$("$SCI" push "${WT}/${suffix}") || exit 1
+push_dir="."
+if [ -n "$index" ]; then
+  push_dir=$(mktemp -d "${TMPDIR:-/tmp}/sci-run-index.XXXXXX")
+  trap 'rm -rf "$push_dir"' EXIT
+  git -C "$(git rev-parse --show-toplevel)" checkout-index --all --prefix="$push_dir/"
+fi
+
+# sci push rsyncs its cwd; the subshell keeps --lcov and everything after it in the worktree.
+job=$(cd "$push_dir" && "$SCI" push "${WT}/${suffix}") || exit 1
 echo "  ${label} queued (${job})"
 # If the hook is interrupted, kill the remote job rather than leaving it to run.
 trap '"$SCI" kill "$job" >/dev/null 2>&1 || true' INT TERM

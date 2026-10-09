@@ -127,6 +127,11 @@ Heavy tests/coverage/e2e are dispatched to the remote GPU queue via `profiles/sc
 The dispatch core (SCI/WT resolution, `ci/before-test-push`, trap-kill on interrupt,
 wait, lcov retrieval) is the shared `scripts/sci-run.sh` — also usable directly for
 repo-local gates, e.g. a pre-push `"${ORG_HOOKS}/scripts/sci-run.sh" --label full-gate test`.
+`sci push` rsyncs the working tree, so a commit that leaves out an untracked file the
+tree needs still passes. A commit gate passes `--index`: `sci-run.sh` exports the git
+index (`git checkout-index --all`) to a temp dir and pushes that, so the job tests
+exactly the staged tree. `--index` refuses `--fallback`, which would run on the working
+tree.
 The coverage ratchet runs at the end of each sci command — after `sci-run.sh` has
 retrieved the lcov from the CI host — so it always checks coverage from the current
 commit; the staged-file filtering lives in the shared `scripts/ratchet-staged.sh`.
