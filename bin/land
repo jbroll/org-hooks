@@ -151,10 +151,10 @@ if [ -x "$MAIN_REPO/scripts/post-land" ]; then
 fi
 
 # A dirty main blocks the next land long after this one finished. Say so here,
-# where the cause is obvious.
-if [ -n "$(git status --porcelain)" ]; then
+# where the cause is obvious. Untracked files never block a land.
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "WARNING: $MAIN_REPO is dirty after landing:" >&2
-  git status --short >&2
+  git status --short --untracked-files=no >&2
   echo "  The next land will refuse until this is resolved (often a lockfile" >&2
   echo "  rewritten by scripts/post-land that should be committed from a worktree)." >&2
 fi

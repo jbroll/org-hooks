@@ -242,6 +242,15 @@ test("warns when post-land leaves main dirty", (t) => {
   assert.match(r.stderr, /is dirty after landing/);
 });
 
+test("does not warn about untracked files in main, which never block a land", (t) => {
+  const f = fixture(t);
+  f.commit("a.txt", "a\n");
+  writeFileSync(join(f.main, "scratch.txt"), "local\n");
+  const r = f.land();
+  assert.equal(r.status, 0, out(r));
+  assert.doesNotMatch(r.stderr, /is dirty after landing/);
+});
+
 test("times out when another land holds the lock", async (t) => {
   const f = fixture(t);
   f.commit("a.txt", "a\n");

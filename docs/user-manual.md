@@ -37,7 +37,8 @@ so every worktree of a repo lands into the same place.
 8. `git push origin main`. simple-ci bases every job on `origin/HEAD`, so a stale `origin/main`
    makes CI test against an old base.
 9. Run `scripts/post-land` from the main checkout, if it is executable.
-10. Warn if the main checkout is dirty, since the next land would refuse.
+10. Warn if the main checkout has tracked changes, since the next land would refuse. Untracked
+    files are ignored, as they are by the checks in step 3.
 
 The land is complete after step 7. A failure in step 8 or 9 is reported with the command to
 re-run and makes `land` exit 1, but nothing is rolled back.
