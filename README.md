@@ -32,6 +32,20 @@ here.
 | `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e (flat `commands:` style) — composes `scripts/sci-run.sh` (dispatch + lcov sync) and `scripts/ratchet-staged.sh` (inline coverage ratchet) |
 | `profiles/sci-tiered.yml` | pre-commit, pre-merge-commit | **self-contained** tiered fail-fast gate — the TS, Python and Kotlin packs inlined and glob-gated (25 static + 1 GPU); pull ONLY this file with ZERO consumer pre-commit overrides |
 
+## `land`
+
+`bin/land [BRANCH]` fast-forwards a repo's `main` onto a rebased worktree branch,
+resets the worktree to it, pushes `main`, and runs the repo's optional
+`scripts/pre-land` and `scripts/post-land` hooks. It replaces the per-repo
+`scripts/land.sh` copies. Install once:
+
+```sh
+ln -s ~/src/org-hooks/bin/land ~/bin/land
+```
+
+Behavior, checks, and the hook contract: [docs/user-manual.md](docs/user-manual.md).
+Tests: `node --test bin/land.test.mjs`.
+
 ## Shared Biome config (`config/biome.base.json`)
 
 A repo onboarding `profiles/ts.yml` adds a `biome.json` that **extends** the

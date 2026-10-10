@@ -1,0 +1,161 @@
+#!/bin/sh
+# land: fast-forward main onto a worktree branch, reset the worktree to it, push
+# main, and run the repo's post-land hook. See docs/user-manual.md.
+#
+# Usage: land [BRANCH]    (BRANCH defaults to the current worktree's branch)
+
+set -e
+
+LOCK_TIMEOUT="${LOCK_TIMEOUT:-30}"
+
+# A commit hook exports these; inheriting them would point every git call below
+# at the hooked repository instead of the one being landed.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX
+
+git_common="$(git rev-parse --git-common-dir 2>/dev/null)" || {
+  echo "error: not inside a git repository" >&2
+  exit 1
+}
+git_common="$(cd "$git_common" && pwd)"
+MAIN_REPO="$(dirname "$git_common")"
+LOCK_FILE="$git_common/land.lock"
+
+if [ $# -gt 1 ]; then
+  echo "usage: land [BRANCH]" >&2
+  exit 1
+fi
+branch="${1:-$(git symbolic-ref --short -q HEAD || true)}"
+if [ -z "$branch" ]; then
+  echo "error: HEAD is detached; name the branch to land: land BRANCH" >&2
+  exit 1
+fi
+if [ "$branch" = "main" ]; then
+  echo "error: cannot land main onto itself" >&2
+  exit 1
+fi
+
+# Locked before any state is read, so edits made while waiting are refused by
+# the checks below instead of discarded by the reset.
+exec 9>"$LOCK_FILE"
+if ! flock -w "$LOCK_TIMEOUT" 9; then
+  echo "error: could not acquire land lock within ${LOCK_TIMEOUT}s; another land in progress?" >&2
+  exit 1
+fi
+
+main_branch="$(git -C "$MAIN_REPO" symbolic-ref --short HEAD 2>/dev/null)" || {
+  echo "error: main repo is in detached HEAD state" >&2
+  exit 1
+}
+if [ "$main_branch" != "main" ]; then
+  echo "error: main repo is on branch '$main_branch', expected 'main'" >&2
+  exit 1
+fi
+
+if ! git -C "$MAIN_REPO" diff --quiet HEAD 2>/dev/null; then
+  echo "error: main repo has uncommitted changes; commit or stash first" >&2
+  exit 1
+fi
+
+worktree_dir="$(git -C "$MAIN_REPO" worktree list --porcelain \
+  | awk -v b="$branch" '
+    /^worktree / { dir = substr($0, 10) }
+    /^branch /   { if (substr($0, 8) == "refs/heads/" b) print dir }
+  ')"
+if [ -z "$worktree_dir" ]; then
+  echo "error: '$branch' is not checked out in any worktree" >&2
+  echo "  (available worktrees:)" >&2
+  git -C "$MAIN_REPO" worktree list >&2
+  exit 1
+fi
+if [ ! -d "$worktree_dir" ]; then
+  echo "error: worktree directory '$worktree_dir' does not exist" >&2
+  exit 1
+fi
+
+if ! git -C "$worktree_dir" diff --quiet HEAD 2>/dev/null; then
+  echo "error: worktree '$worktree_dir' has uncommitted changes" >&2
+  echo "  commit or stash changes on '$branch' before landing" >&2
+  exit 1
+fi
+
+ahead="$(git -C "$MAIN_REPO" rev-list --count "main..$branch" 2>/dev/null)" || {
+  echo "error: branch '$branch' does not exist" >&2
+  exit 1
+}
+if [ "$ahead" = "0" ]; then
+  echo "error: '$branch' has no commits ahead of main; nothing to land" >&2
+  exit 1
+fi
+
+main_head="$(git -C "$MAIN_REPO" rev-parse main)"
+merge_base="$(git -C "$MAIN_REPO" merge-base main "$branch")"
+if [ "$merge_base" != "$main_head" ]; then
+  behind="$(git -C "$MAIN_REPO" rev-list --count "$branch..main")"
+  echo "error: '$branch' is not rebased onto current main ($behind commits behind)" >&2
+  echo "  run: git -C '$worktree_dir' rebase main" >&2
+  exit 1
+fi
+
+export LAND_BRANCH="$branch" LAND_MAIN_REPO="$MAIN_REPO" LAND_WORKTREE="$worktree_dir"
+
+if [ -x "$worktree_dir/scripts/pre-land" ]; then
+  if ! (cd "$worktree_dir" && scripts/pre-land); then
+    echo "error: scripts/pre-land failed for '$branch'; nothing landed" >&2
+    exit 1
+  fi
+fi
+
+branch_head="$(git -C "$MAIN_REPO" rev-parse "$branch")"
+echo "lock acquired; landing $branch ($ahead commit(s)) onto main"
+
+cd "$MAIN_REPO"
+if ! git merge --ff-only "$branch"; then
+  echo "error: ff-only merge failed unexpectedly (pre-checks passed)" >&2
+  exit 1
+fi
+
+new_main="$(git rev-parse HEAD)"
+if [ "$new_main" != "$branch_head" ]; then
+  echo "error: post-merge HEAD ($new_main) does not match branch ($branch_head)" >&2
+  echo "  main may be in an unexpected state; investigate manually" >&2
+  exit 1
+fi
+
+git -C "$worktree_dir" reset --hard main
+
+echo "landed $branch; main and worktree both at $(git rev-parse --short HEAD)"
+
+# The local land is complete. A failure from here on is reported and makes the
+# exit status non-zero, but nothing is rolled back.
+failed=0
+
+# simple-ci bases every job on origin/HEAD, so main must reach origin.
+if git push origin main; then
+  echo "pushed main to origin"
+else
+  echo "FAILED: 'git push origin main'; the local land is complete, but origin/main is stale." >&2
+  echo "  Re-run: git -C '$MAIN_REPO' push origin main" >&2
+  failed=1
+fi
+
+if [ -x "$MAIN_REPO/scripts/post-land" ]; then
+  if scripts/post-land; then
+    echo "ran scripts/post-land"
+  else
+    echo "FAILED: scripts/post-land in $MAIN_REPO. Re-run:" >&2
+    echo "  ( cd '$MAIN_REPO' && scripts/post-land )" >&2
+    failed=1
+  fi
+fi
+
+# A dirty main blocks the next land long after this one finished. Say so here,
+# where the cause is obvious.
+if [ -n "$(git status --porcelain)" ]; then
+  echo "WARNING: $MAIN_REPO is dirty after landing:" >&2
+  git status --short >&2
+  echo "  The next land will refuse until this is resolved (often a lockfile" >&2
+  echo "  rewritten by scripts/post-land that should be committed from a worktree)." >&2
+fi
+
+exit "$failed"
