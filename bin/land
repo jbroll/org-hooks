@@ -100,7 +100,8 @@ fi
 export LAND_BRANCH="$branch" LAND_MAIN_REPO="$MAIN_REPO" LAND_WORKTREE="$worktree_dir"
 
 if [ -x "$worktree_dir/scripts/pre-land" ]; then
-  if ! (cd "$worktree_dir" && scripts/pre-land); then
+  # Hooks run without fd 9 so a process they leave behind cannot hold the lock.
+  if ! (cd "$worktree_dir" && scripts/pre-land 9>&-); then
     echo "error: scripts/pre-land failed for '$branch'; nothing landed" >&2
     exit 1
   fi
@@ -140,7 +141,7 @@ else
 fi
 
 if [ -x "$MAIN_REPO/scripts/post-land" ]; then
-  if scripts/post-land; then
+  if scripts/post-land 9>&-; then
     echo "ran scripts/post-land"
   else
     echo "FAILED: scripts/post-land in $MAIN_REPO. Re-run:" >&2
