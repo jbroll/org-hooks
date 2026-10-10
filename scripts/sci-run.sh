@@ -10,7 +10,8 @@
 #                     instead of the working tree, so untracked files and
 #                     unstaged edits never reach the job. For commit gates.
 #                     Conflicts with --fallback, which would run on the
-#                     working tree.
+#                     working tree, and with --before, whose output lands in
+#                     the working tree and would not be pushed.
 #   --label name      display name for the "queued" line (default: the suffix)
 #   --before script   run script before dispatch IF it exists+is executable
 #                     (the ci/before-test-push convention); its failure aborts
@@ -46,6 +47,10 @@ done
 [ $# -eq 1 ] || usage
 if [ -n "$index" ] && [ -n "$fallback" ]; then
   echo "sci-run: --index and --fallback conflict: the fallback would test the working tree" >&2
+  exit 2
+fi
+if [ -n "$index" ] && [ -n "$before" ]; then
+  echo "sci-run: --index and --before conflict: the hook writes to the working tree, which is not pushed" >&2
   exit 2
 fi
 suffix="$1"

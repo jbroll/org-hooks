@@ -322,3 +322,19 @@ test("--index with --fallback is a usage error: a local fallback would test the 
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--index.*--fallback/);
 });
+
+test("--index with --before is a usage error: the hook's output would miss the exported tree", () => {
+  const s = sandbox();
+  const marker = join(s.dir, "before-ran");
+  const hook = join(s.dir, "before");
+  writeFileSync(hook, `#!/bin/sh\ntouch ${marker}\n`);
+  chmodSync(hook, 0o755);
+  const r = run(["--index", "--before", hook, "ci/test"], {
+    env: { SCI_BIN: s.sci, SCI_WT: "myrepo" },
+  });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--index.*--before/);
+  assert.equal(existsSync(marker), false, "the hook did not run");
+  assert.equal(existsSync(s.log), false, "nothing was pushed");
+  rmSync(s.dir, { recursive: true, force: true });
+});

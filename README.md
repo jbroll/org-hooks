@@ -131,7 +131,8 @@ repo-local gates, e.g. a pre-push `"${ORG_HOOKS}/scripts/sci-run.sh" --label ful
 tree needs still passes. A commit gate passes `--index`: `sci-run.sh` exports the git
 index (`git checkout-index --all`) to a temp dir and pushes that, so the job tests
 exactly the staged tree. `--index` refuses `--fallback`, which would run on the working
-tree.
+tree, and `--before`, whose output (such as `ci/.changed-files`) lands in the working tree
+and would never reach the job.
 The coverage ratchet runs at the end of each sci command — after `sci-run.sh` has
 retrieved the lcov from the CI host — so it always checks coverage from the current
 commit; the staged-file filtering lives in the shared `scripts/ratchet-staged.sh`.
