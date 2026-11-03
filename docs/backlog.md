@@ -58,3 +58,7 @@ and when is in the git log.
   lefthook.yml", but rowboat's `lefthook.yml` has no `pre-push:` block and
   neither does the `profiles/ts.yml` it pulls. Fix the comment or wire the
   hook; while here, confirm no other consumer carries the same stale claim.
+
+- **rkrouter: move from mypy to pyright.** Replace `[tool.mypy] strict = true` with
+  `[tool.pyright]` (strict if wanted) and fix the findings when its org-hooks pin
+  (v0.7.25) is bumped.

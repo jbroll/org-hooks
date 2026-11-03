@@ -29,7 +29,7 @@
 #        hygiene, format-lint, dup-types, no-reexports, size-caps). Runs FIRST so
 #        a cheap violation fails in <1s instead of waiting out typecheck/knip/dpdm.
 #     2. tier1-static  — group(parallel: true): the slow local static analysis
-#        (typecheck, knip, dpdm circular; mypy/vulture/deptry/pytest; detekt).
+#        (typecheck, knip, dpdm circular; pyright/vulture/deptry/pytest; detekt).
 #        Runs only if tier1-instant passed.
 #     3. tier2-gpu     — group(parallel: true): a coverage-union job that
 #        sci-dispatches BOTH the unit and e2e GPU runs in parallel, then merges
@@ -78,9 +78,10 @@
 #
 # All three language packs are folded in and glob-gated, so a repo gets the
 # checks for the languages it actually has. Host tools: gitleaks, biome (npx),
-# ruff, uv, ktlint, detekt. A Python project pins mypy and pytest in its own dev
-# group — they run from the project env, not an isolated `uv tool run`, so
-# third-party imports type-check and the suite sees its dependencies. Kotlin
+# ruff, uv, ktlint, detekt. pyright and pytest run from the Python project's own
+# env (`uv run`), not an isolated `uv tool run`, so third-party imports
+# type-check and the suite sees its dependencies. pyright is added with
+# `--with`, so the project need not pin it. It brings Node (see python.yml). Kotlin
 # compile/test run in tier2 against a plain-JVM `:core` module, which needs only
 # the JDK; an Android `:app` build needs the SDK and stays out of the gate.
 
@@ -138,7 +139,7 @@ pre-commit:
             glob: "*.{test,spec}.{ts,tsx,js,jsx}"
             run: '"${ORG_HOOKS}/scripts/hygiene.sh" test-size-cap {staged_files}'
           # Python format+lint+hygiene (glob-gated: inert in repos with no .py).
-          # Host tool ruff; mypy/vulture/deptry/pytest are in tier1-static below.
+          # Host tool ruff; pyright/vulture/deptry/pytest are in tier1-static below.
           # Mirrors profiles/python.yml, except that the whole-project tools run
           # per Python project via scripts/py-run.sh instead of at the repo root —
           # in a polyglot repo the pyproject.toml sits in a subdirectory. ruff
@@ -194,16 +195,16 @@ pre-commit:
               entries=""; for r in ${TS_SCAN_ROOTS:-src packages/*/src backend/src}; do entries="$entries \"$r/**/*.{ts,tsx}\""; done;
               eval "npx --no-install dpdm --no-warning --no-tree --exit-code \"${DPDM_CIRCULAR:-circular:1}\" $entries"
           # Python whole-project analysis, each run at its own project root by
-          # py-run.sh. mypy and pytest come from the project's own env (`uv run`),
-          # so a repo pins them in its dev group and controls strictness in
-          # pyproject.toml; vulture and deptry need no project deps and run via
+          # py-run.sh. pyright and pytest run in the project's own env (`uv run`);
+          # pytest is pinned in the repo's dev group, pyright comes from
+          # `--with`, and strictness is set in [tool.pyright] in pyproject.toml; vulture and deptry need no project deps and run via
           # `uv tool run`. py-test lives here rather than in tier2 because a
           # Python suite runs locally in about a second — there is nothing to
           # dispatch, and a red suite should gate the GPU tier like everything
           # else in tier 1.
           - name: py-typecheck
             glob: "*.py"
-            run: '"${ORG_HOOKS}/scripts/py-run.sh" "uv run mypy" {staged_files}'
+            run: '"${ORG_HOOKS}/scripts/py-run.sh" "uv run --with pyright pyright" {staged_files}'
           - name: py-deadcode
             glob: "*.py"
             run: '"${ORG_HOOKS}/scripts/py-run.sh" "uv tool run vulture . --min-confidence 80" {staged_files}'

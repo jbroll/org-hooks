@@ -3,7 +3,7 @@
 #
 #   py-run.sh '<shell command>' <file>...
 #
-# mypy, pytest and deptry all resolve config, dependencies and import roots from
+# pyright, pytest and deptry all resolve config, dependencies and import roots from
 # the directory they start in. lefthook hands us repo-relative paths and runs at
 # the repo root, which in a polyglot repo is not where pyproject.toml lives — so
 # each file is mapped to its nearest ancestor pyproject.toml and the command runs

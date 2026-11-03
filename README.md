@@ -7,8 +7,10 @@ here.
 
 ## Why this design
 
-- **Polyglot, no Node tax** — Lefthook is a single Go binary; Python-only
-  repos don't pull a Node toolchain just to get hooks.
+- **Polyglot, little Node tax** — Lefthook is a single Go binary; Python-only
+  repos don't pull a Node toolchain just to get hooks. The one exception is
+  the Python type check: pyright's pip package fetches Node on first use, a
+  deliberate trade for gating with the same checker the editor runs.
 - **One config, many repos** — repos track tip (`ref: main` +
   `refetch: true`); a change here rolls out everywhere on next
   `lefthook install`.
@@ -26,7 +28,7 @@ here.
 | `lefthook-common.yml` | pre-commit, pre-merge-commit | secret scan (gitleaks), hygiene (large files / conflict markers / EOF), linear-history guard |
 | `lefthook-push.yml` | pre-push | language-agnostic push gates |
 | `profiles/ts.yml` | adds to pre-commit | Biome (staged) · tsc · knip · dpdm · duplicate-type scan · no-reexports · size-cap |
-| `profiles/python.yml` | adds to pre-commit | ruff format+lint+autofix (staged, re-staged) · mypy · vulture · deptry · import-linter (only if a contract exists) · size-cap · test-size-cap — all at commit, parallel, glob-gated (mirrors `ts.yml`; no pre-push) |
+| `profiles/python.yml` | adds to pre-commit | ruff format+lint+autofix (staged, re-staged) · pyright · vulture · deptry · import-linter (only if a contract exists) · size-cap · test-size-cap — all at commit, parallel, glob-gated (mirrors `ts.yml`; no pre-push) |
 | `profiles/kotlin.yml` | adds to pre-commit | ktlint format+lint+autofix (staged, re-staged) · detekt AST static analysis · size-cap · test-size-cap — all at commit, parallel, glob-gated (mirrors `ts.yml`/`python.yml`). Lint/static only — Gradle compile/test needs the SDK and belongs in the repo's own lefthook (dispatch to a build host). Java = a future `profiles/java.yml` (spotless/checkstyle), same shape. |
 | `profiles/specs.yml` | pre-commit/post-commit | AI-Roller `air check` / artifact-drift (ai-roller only) |
 | `profiles/sci.yml` | pre-commit | simple-ci GPU dispatch for unit + e2e (flat `commands:` style) — composes `scripts/sci-run.sh` (dispatch + lcov sync) and `scripts/ratchet-staged.sh` (inline coverage ratchet) |
@@ -98,7 +100,7 @@ the consumer's `rc:`), never config overrides:
 | `SCI_BIN` | `/home/john/src/simple-ci/sci` | simple-ci binary; falls back to `npm run test:coverage`/`test:e2e` if absent |
 | `COVERAGE_E2E_BASELINE_LCOV` | `coverage/e2e-fullrun/lcov.info` | local path the persisted full-run e2e lcov is fetched to and fed to the union merge as `--e2e-baseline` (full-e2e carry-forward, below) |
 
-**Python projects in a subdirectory.** mypy, pytest and deptry resolve config,
+**Python projects in a subdirectory.** pyright, pytest and deptry resolve config,
 dependencies and import roots from the directory they start in, which in a
 polyglot repo is not the repo root. `scripts/py-run.sh` maps each staged file to
 its nearest ancestor `pyproject.toml` and runs the command there, once per
@@ -107,9 +109,12 @@ as a flat Python repo. A staged `.py` under no `pyproject.toml` fails the commit
 rather than being skipped. (`profiles/python.yml`, the standalone pack, still
 assumes the project is at the repo root.)
 
-mypy and pytest run as `uv run` from the project's own environment, so a repo
-pins them in its dev group; third-party imports then type-check and the suite
-sees its dependencies. vulture, deptry and import-linter need no project deps and
+pyright and pytest run as `uv run` from the project's own environment. pyright
+is added with `--with`, so a repo need not pin it; pytest is pinned in the
+repo's dev group. Third-party imports then type-check and the suite sees its
+dependencies. pyright needs Node, which its pip package downloads on first
+use. Strictness is set in `[tool.pyright]` or `pyrightconfig.json`; pyright's
+default is basic. vulture, deptry and import-linter need no project deps and
 run via `uv tool run`. Every tool reads its settings from the repo's
 `pyproject.toml`, so strictness stays repo-local.
 
@@ -585,7 +590,7 @@ node <ORG_HOOKS>/scripts/coverage-ratchet.mjs --seed \
 | lefthook | hook runner | `npm i -g lefthook` |
 | gitleaks | secret scanning | release binary → `~/.local/bin` |
 | ruff | Python format+lint | (already present) `~/.local/bin` |
-| uv | Python runner — `uv tool run` for vulture/deptry/import-linter, `uv run` for the project's own mypy/pytest | `~/.local/bin` |
+| uv | Python runner — `uv tool run` for vulture/deptry/import-linter, `uv run` for the project's own pyright/pytest (pyright fetches Node on first use) | `~/.local/bin` |
 | ktlint | Kotlin format+lint | release binary → `/usr/local/bin/ktlint` (self-executable, needs JDK 17+) |
 | detekt | Kotlin static analysis | `detekt-cli-<ver>-all.jar` → wrap as `detekt` on PATH (`java -jar …`) |
 | typos | spell check (optional) | `cargo install typos-cli` |

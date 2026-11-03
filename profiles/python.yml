@@ -6,22 +6,30 @@
 # wants a push safety net adds one in its own lefthook.yml.
 #
 # ruff is host-installed (format + lint + import-sort + security S-rules,
-# replacing black/isort/flake8/pyupgrade/bandit). mypy / vulture / deptry /
+# replacing black/isort/flake8/pyupgrade/bandit). vulture / deptry /
 # import-linter run via `uv tool run` so no repo-level install is required; a
 # repo may instead pin them in its own dev extras and drop the `uv tool run`.
+# pyright runs via `uv run --with pyright`, in the repo's own environment, so
+# third-party imports resolve whether or not the repo pins pyright.
 #
 # Per-tool config is repo-local: every tool reads its settings from the repo's
-# pyproject.toml ([tool.ruff], [tool.mypy], [tool.vulture], …). org-hooks
+# pyproject.toml ([tool.ruff], [tool.pyright], [tool.vulture], …). org-hooks
 # supplies only the invocation + glob gate, so each repo controls strictness —
 # the same contract as the TS pack delegating to repo npm scripts.
 #
 # Glob-gated like the TS pack: a commit with no .py (or no dep manifest change,
-# for py-deps) skips that command — no mypy/vulture/deptry cost on unrelated
-# commits. mypy/vulture/deptry scan the project (`.`), not just the staged
+# for py-deps) skips that command — no pyright/vulture/deptry cost on unrelated
+# commits. pyright/vulture/deptry scan the project (`.`), not just the staged
 # files, because they need whole-module context (mirrors tsc/knip).
 #
-# 2026 notes: stay on mypy for gating prod code (ty still beta, pyrefly
-# greenfield-only). deptry = unused/missing deps. import-linter enforces
+# Type checker: pyright, so the gate matches the checker the editor and LSP run.
+# It checks the bodies of unannotated functions and infers return types, which
+# mypy skips by default, and it is faster on a whole-project run. Its pip package
+# is a Node wrapper that downloads Node on first use; this is a deliberate
+# exception to the README's "no Node tax" line. Strictness is the repo's:
+# [tool.pyright] or pyrightconfig.json, basic by default.
+#
+# deptry = unused/missing deps. import-linter enforces
 # architecture / no-cycle contracts (the dpdm analog) and runs ONLY when the
 # repo defines a contract (.importlinter or [tool.importlinter]); otherwise it
 # is a no-op, so zero cost for repos that don't use it.
@@ -47,11 +55,11 @@ pre-commit:
         && ruff format {staged_files}
       stage_fixed: true
     py-typecheck:
-      # Whole-project type check (mypy needs cross-module context), glob-gated
-      # so it only runs when a .py is staged — mirrors `npm run type-check`.
-      # Configure strictness in [tool.mypy] in the repo's pyproject.toml.
+      # Whole-project type check, glob-gated so it only runs when a .py is
+      # staged — mirrors `npm run type-check`. Configure strictness in
+      # [tool.pyright] in the repo's pyproject.toml.
       glob: "*.py"
-      run: uv tool run mypy .
+      run: uv run --with pyright pyright
     py-deadcode:
       glob: "*.py"
       run: uv tool run vulture . --min-confidence 80

@@ -49,7 +49,7 @@ pre-commit:
       run: ktlint --format --relative {staged_files}
       stage_fixed: true
     kt-static:
-      # AST static analysis (the mypy/vulture analog). detekt needs source-set
+      # AST static analysis (the pyright/vulture analog). detekt needs source-set
       # context, so it scans the tree (excluding build output), glob-gated to run
       # only when a .kt is staged. --build-upon-default-config means the repo's
       # detekt.yml only overrides defaults; with no detekt.yml it runs pure
