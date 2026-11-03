@@ -140,13 +140,29 @@ test("refuses a dirty worktree", (t) => {
   assert.match(r.stderr, /worktree .* has uncommitted changes/);
 });
 
-test("refuses a branch not rebased onto main", (t) => {
+test("rebases a branch behind main, then lands it", (t) => {
   const f = fixture(t);
   f.commit("a.txt", "a\n");
   f.commit("m.txt", "m\n", f.main);
   const r = f.land();
+  assert.equal(r.status, 0, out(r));
+  assert.match(r.stdout, /rebasing 'wt\/1' onto current main \(1 commit\(s\) behind\)/);
+  assert.equal(git(f.main, "rev-parse", "main"), git(f.wt, "rev-parse", "HEAD"));
+  assert.equal(readFileSync(join(f.main, "m.txt"), "utf8"), "m\n");
+  assert.equal(readFileSync(join(f.main, "a.txt"), "utf8"), "a\n");
+});
+
+test("stops on a rebase conflict, leaving main untouched", (t) => {
+  const f = fixture(t);
+  f.commit("README", "branch\n");
+  f.commit("README", "main\n", f.main);
+  const before = git(f.main, "rev-parse", "main");
+  const r = f.land();
   assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /not rebased onto current main \(1 commits behind\)/);
+  assert.match(r.stderr, /rebase of 'wt\/1' onto main failed with conflicts/);
+  assert.match(r.stderr, /README/);
+  assert.equal(git(f.main, "rev-parse", "main"), before);
+  assert.equal(git(f.origin, "rev-parse", "main"), git(f.main, "rev-parse", "main~1"));
 });
 
 test("refuses a dirty main checkout", (t) => {

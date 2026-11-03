@@ -92,9 +92,29 @@ main_head="$(git -C "$MAIN_REPO" rev-parse main)"
 merge_base="$(git -C "$MAIN_REPO" merge-base main "$branch")"
 if [ "$merge_base" != "$main_head" ]; then
   behind="$(git -C "$MAIN_REPO" rev-list --count "$branch..main")"
-  echo "error: '$branch' is not rebased onto current main ($behind commits behind)" >&2
-  echo "  run: git -C '$worktree_dir' rebase main" >&2
-  exit 1
+  echo "rebasing '$branch' onto current main ($behind commit(s) behind)..."
+  if ! git -C "$worktree_dir" rebase main; then
+    echo "error: rebase of '$branch' onto main failed with conflicts" >&2
+    echo "  worktree: $worktree_dir (mid-rebase; main untouched)" >&2
+    echo "  conflicted files:" >&2
+    git -C "$worktree_dir" diff --name-only --diff-filter=U >&2 || true
+    echo "  inspect: git -C '$worktree_dir' status --short" >&2
+    echo "  resolve, then: git -C '$worktree_dir' add <files> && git -C '$worktree_dir' rebase --continue" >&2
+    echo "  give up: git -C '$worktree_dir' rebase --abort (branch restored, main untouched)" >&2
+    echo "  then re-run: land $branch" >&2
+    exit 1
+  fi
+  main_head="$(git -C "$MAIN_REPO" rev-parse main)"
+  merge_base="$(git -C "$MAIN_REPO" merge-base main "$branch")"
+  if [ "$merge_base" != "$main_head" ]; then
+    echo "error: rebase completed but '$branch' is still not on current main" >&2
+    exit 1
+  fi
+  ahead="$(git -C "$MAIN_REPO" rev-list --count "main..$branch")"
+  if [ "$ahead" = "0" ]; then
+    echo "error: '$branch' has no commits ahead of main after rebase; nothing to land" >&2
+    exit 1
+  fi
 fi
 
 export LAND_BRANCH="$branch" LAND_MAIN_REPO="$MAIN_REPO" LAND_WORKTREE="$worktree_dir"

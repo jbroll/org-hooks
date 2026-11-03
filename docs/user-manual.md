@@ -27,8 +27,11 @@ so every worktree of a repo lands into the same place.
    - `BRANCH` is checked out in a worktree, and that directory exists
    - that worktree has no uncommitted changes to tracked files
    - `BRANCH` has commits ahead of `main`
-   - `BRANCH` is rebased onto the current `main` (its merge base is `main`'s head); the error
-     prints the `git rebase main` command to run
+   - `BRANCH` is rebased onto the current `main` (its merge base is `main`'s head). If it is
+     behind, `land` runs `git rebase main` in the worktree. A conflict stops the land with `main`
+     untouched and the worktree mid-rebase; the error lists the conflicted files and the commands
+     to resolve and continue, or to abort. After a clean rebase `BRANCH` must still have commits
+     ahead of `main`.
 4. Run `scripts/pre-land` from the worktree, if it is executable. A non-zero exit stops the land
    with `main` untouched.
 5. `git merge --ff-only BRANCH` in the main checkout.
