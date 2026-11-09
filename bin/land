@@ -1,5 +1,5 @@
 #!/bin/sh
-# land: fast-forward main onto a worktree branch, reset the worktree to it, push
+# land: fast-forward main onto a branch, reset the branch's worktree to it, push
 # main, and run the repo's post-land hook. See docs/user-manual.md.
 #
 # Usage: land [BRANCH]    (BRANCH defaults to the current worktree's branch)
@@ -47,7 +47,12 @@ main_branch="$(git -C "$MAIN_REPO" symbolic-ref --short HEAD 2>/dev/null)" || {
   echo "error: main repo is in detached HEAD state" >&2
   exit 1
 }
-if [ "$main_branch" != "main" ]; then
+# The main checkout may hold the branch itself; it is then rebased in place and
+# switched back to main for the merge.
+in_place=0
+if [ "$main_branch" = "$branch" ]; then
+  in_place=1
+elif [ "$main_branch" != "main" ]; then
   echo "error: main repo is on branch '$main_branch', expected 'main'" >&2
   exit 1
 fi
@@ -131,6 +136,10 @@ branch_head="$(git -C "$MAIN_REPO" rev-parse "$branch")"
 echo "lock acquired; landing $branch ($ahead commit(s)) onto main"
 
 cd "$MAIN_REPO"
+if [ "$in_place" = 1 ] && ! git switch -q main; then
+  echo "error: could not switch the main checkout from '$branch' to main; nothing landed" >&2
+  exit 1
+fi
 if ! git merge --ff-only "$branch"; then
   echo "error: ff-only merge failed unexpectedly (pre-checks passed)" >&2
   exit 1
@@ -143,9 +152,12 @@ if [ "$new_main" != "$branch_head" ]; then
   exit 1
 fi
 
-git -C "$worktree_dir" reset --hard main
-
-echo "landed $branch; main and worktree both at $(git rev-parse --short HEAD)"
+if [ "$in_place" = 1 ]; then
+  echo "landed $branch; main checkout now on main at $(git rev-parse --short HEAD)"
+else
+  git -C "$worktree_dir" reset --hard main
+  echo "landed $branch; main and worktree both at $(git rev-parse --short HEAD)"
+fi
 
 # The local land is complete. A failure from here on is reported and makes the
 # exit status non-zero, but nothing is rolled back.

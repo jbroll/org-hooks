@@ -14,6 +14,11 @@ from the main checkout.
 The main checkout is the parent of the repo's common git dir (`git rev-parse --git-common-dir`),
 so every worktree of a repo lands into the same place.
 
+`BRANCH` may be checked out in the main checkout itself. `land` then rebases it there, switches
+the main checkout to `main` before the merge, and skips the reset in step 7. The main checkout
+ends on `main` at the landed tip. While the main checkout is on any other branch, every land in
+the repo is refused.
+
 ### Order of operations
 
 1. Refuse `main` and a detached HEAD with no `BRANCH` given.
@@ -22,9 +27,9 @@ so every worktree of a repo lands into the same place.
    each other. The lock is taken before any state is read: an edit made while waiting is caught
    by the checks below instead of being thrown away by the reset in step 7.
 3. Check, in order, and stop with an error on the first failure:
-   - the main checkout is on `main`
+   - the main checkout is on `main` or on `BRANCH`
    - the main checkout has no uncommitted changes to tracked files
-   - `BRANCH` is checked out in a worktree, and that directory exists
+   - `BRANCH` is checked out in a worktree or the main checkout, and that directory exists
    - that worktree has no uncommitted changes to tracked files
    - `BRANCH` has commits ahead of `main`
    - `BRANCH` is rebased onto the current `main` (its merge base is `main`'s head). If it is
@@ -34,9 +39,10 @@ so every worktree of a repo lands into the same place.
      ahead of `main`.
 4. Run `scripts/pre-land` from the worktree, if it is executable. A non-zero exit stops the land
    with `main` untouched.
-5. `git merge --ff-only BRANCH` in the main checkout.
+5. `git merge --ff-only BRANCH` in the main checkout, after `git switch main` if the main
+   checkout was on `BRANCH`.
 6. Check that `main`'s new head is `BRANCH`'s head.
-7. `git reset --hard main` in the worktree.
+7. `git reset --hard main` in the worktree. Skipped when `BRANCH` was in the main checkout.
 8. `git push origin main`. simple-ci bases every job on `origin/HEAD`, so a stale `origin/main`
    makes CI test against an old base.
 9. Run `scripts/post-land` from the main checkout, if it is executable.
@@ -60,7 +66,7 @@ Both hooks are optional executables in the repo, run with these variables set:
 |---|---|
 | `LAND_BRANCH` | the branch being landed |
 | `LAND_MAIN_REPO` | absolute path of the main checkout |
-| `LAND_WORKTREE` | absolute path of the branch's worktree |
+| `LAND_WORKTREE` | absolute path of the branch's worktree, or of the main checkout when the branch is there |
 
 | Hook | Copy that runs | Working directory | When | On failure |
 |---|---|---|---|---|

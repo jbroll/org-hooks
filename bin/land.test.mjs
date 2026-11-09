@@ -183,6 +183,44 @@ test("refuses when the main checkout is not on main", (t) => {
   assert.match(r.stderr, /on branch 'other', expected 'main'/);
 });
 
+test("lands a branch checked out in the main checkout and leaves it on main", (t) => {
+  const f = fixture(t);
+  git(f.main, "checkout", "-q", "-b", "local");
+  f.commit("a.txt", "a\n", f.main);
+  const tip = git(f.main, "rev-parse", "HEAD");
+  const r = f.land([], { cwd: f.main });
+  assert.equal(r.status, 0, out(r));
+  assert.equal(git(f.main, "symbolic-ref", "--short", "HEAD"), "main");
+  assert.equal(git(f.main, "rev-parse", "main"), tip);
+  assert.equal(git(f.origin, "rev-parse", "main"), tip);
+});
+
+test("rebases an in-place branch behind main before landing it", (t) => {
+  const f = fixture(t);
+  f.commit("m.txt", "m\n", f.main);
+  git(f.main, "checkout", "-q", "-b", "local", "main~1");
+  f.commit("a.txt", "a\n", f.main);
+  const r = f.land(["local"], { cwd: f.wt });
+  assert.equal(r.status, 0, out(r));
+  assert.match(r.stdout, /rebasing 'local' onto current main/);
+  assert.equal(git(f.main, "symbolic-ref", "--short", "HEAD"), "main");
+  assert.equal(readFileSync(join(f.main, "m.txt"), "utf8"), "m\n");
+  assert.equal(readFileSync(join(f.main, "a.txt"), "utf8"), "a\n");
+});
+
+test("an in-place rebase conflict leaves main untouched and the checkout mid-rebase", (t) => {
+  const f = fixture(t);
+  f.commit("README", "main\n", f.main);
+  const before = git(f.main, "rev-parse", "main");
+  git(f.main, "checkout", "-q", "-b", "local", "main~1");
+  f.commit("README", "branch\n", f.main);
+  const r = f.land([], { cwd: f.main });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /rebase of 'local' onto main failed with conflicts/);
+  assert.equal(git(f.main, "rev-parse", "main"), before);
+  assert.ok(existsSync(join(f.main, ".git", "rebase-merge")));
+});
+
 test("exits non-zero when the push fails, keeping the local land", (t) => {
   const f = fixture(t);
   git(f.main, "remote", "set-url", "origin", join(f.tmp, "missing.git"));

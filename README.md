@@ -36,8 +36,8 @@ here.
 
 ## `land`
 
-`bin/land [BRANCH]` fast-forwards a repo's `main` onto a rebased worktree branch,
-resets the worktree to it, pushes `main`, and runs the repo's optional
+`bin/land [BRANCH]` fast-forwards a repo's `main` onto a rebased branch, checked
+out in a worktree or in the main checkout itself, resets the worktree to it, pushes `main`, and runs the repo's optional
 `scripts/pre-land` and `scripts/post-land` hooks. It replaces the per-repo
 `scripts/land.sh` copies. Install once:
 
